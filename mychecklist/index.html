@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#2C6E63" />
+    <title>MyChecklist — เช็คลิสต์ส่วนตัว</title>
+    <meta name="description" content="แอปเช็คลิสต์ส่วนตัว ใช้คนเดียว ไม่มีเซิร์ฟเวอร์ ข้อมูลอยู่ในเครื่อง" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- Header status bar -->
+      <header class="header">
+        <div class="header__top">
+          <div>
+            <div class="header__today" id="todayLabel">—</div>
+            <div class="header__summary" id="summaryLabel">กำลังโหลด…</div>
+          </div>
+          <button
+            class="icon-btn"
+            id="bellBtn"
+            title="เปิดการแจ้งเตือนของระบบ"
+            aria-label="เปิดการแจ้งเตือน"
+          >
+            🔔
+          </button>
+        </div>
+
+        <!-- Quick add -->
+        <form class="quickadd" id="quickAddForm" autocomplete="off">
+          <input
+            class="quickadd__title"
+            id="titleInput"
+            type="text"
+            placeholder="พิมพ์งานที่ต้องทำ แล้วกด Enter…"
+            aria-label="ชื่องาน"
+            required
+          />
+          <div class="quickadd__row">
+            <div class="chips" role="group" aria-label="เลือกวันด่วน">
+              <button type="button" class="chip" data-quick="today">วันนี้</button>
+              <button type="button" class="chip" data-quick="tomorrow">พรุ่งนี้</button>
+              <button type="button" class="chip" data-quick="week">+7 วัน</button>
+            </div>
+            <input class="quickadd__date" id="dateInput" type="date" aria-label="วันครบกำหนด" />
+            <input class="quickadd__time" id="timeInput" type="time" aria-label="เวลา (ไม่บังคับ)" />
+            <select class="quickadd__repeat" id="repeatInput" aria-label="ทำซ้ำ">
+              <option value="none">ไม่ซ้ำ</option>
+              <option value="daily">ทุกวัน</option>
+              <option value="weekly">ทุกสัปดาห์</option>
+              <option value="monthly">ทุกเดือน</option>
+              <option value="yearly">ทุกปี</option>
+            </select>
+            <input
+              class="quickadd__tag"
+              id="tagInput"
+              type="text"
+              placeholder="แท็ก/อาคาร (ไม่บังคับ)"
+              aria-label="แท็กหรืออาคาร"
+            />
+            <button class="quickadd__submit" type="submit">เพิ่ม</button>
+          </div>
+        </form>
+      </header>
+
+      <!-- Tabs -->
+      <nav class="tabs" role="tablist">
+        <button class="tab tab--active" id="tabOpen" role="tab" aria-selected="true">
+          ค้างอยู่ <span class="tab__count" id="openCount">0</span>
+        </button>
+        <button class="tab" id="tabDone" role="tab" aria-selected="false">เสร็จแล้ว</button>
+      </nav>
+
+      <!-- Search -->
+      <div class="searchbar">
+        <input
+          type="search"
+          id="searchInput"
+          class="searchbar__input"
+          placeholder="🔍 ค้นหางาน / แท็ก / โน้ต…"
+          aria-label="ค้นหา"
+        />
+      </div>
+
+      <!-- Tag filter -->
+      <div class="tagfilter" id="tagFilter" hidden></div>
+
+      <!-- Main list -->
+      <main class="list" id="list" aria-live="polite"></main>
+
+      <!-- Footer actions -->
+      <footer class="footer">
+        <button class="link-btn" id="exportBtn">⬇︎ สำรองข้อมูล</button>
+        <button class="link-btn" id="importBtn">⬆︎ กู้ข้อมูล</button>
+        <input type="file" id="importFile" accept="application/json" hidden />
+        <span class="footer__note">ข้อมูลเก็บในเครื่องนี้เท่านั้น</span>
+      </footer>
+    </div>
+
+    <!-- In-app toast / notification -->
+    <div class="toast" id="toast" role="status" hidden></div>
+
+    <!-- Edit dialog -->
+    <dialog class="dialog" id="editDialog">
+      <form method="dialog" class="dialog__form" id="editForm">
+        <h2 class="dialog__title">แก้ไขงาน</h2>
+        <label class="field">
+          <span>ชื่องาน</span>
+          <input type="text" id="editTitle" required />
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span>วันครบกำหนด</span>
+            <input type="date" id="editDate" />
+          </label>
+          <label class="field">
+            <span>เวลา</span>
+            <input type="time" id="editTime" />
+          </label>
+        </div>
+        <label class="field">
+          <span>โน้ต (ไม่บังคับ)</span>
+          <textarea id="editNote" rows="2"></textarea>
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span>ทำซ้ำ</span>
+            <select id="editRepeat">
+              <option value="none">ไม่ซ้ำ</option>
+              <option value="daily">ทุกวัน</option>
+              <option value="weekly">ทุกสัปดาห์</option>
+              <option value="monthly">ทุกเดือน</option>
+              <option value="yearly">ทุกปี</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>แท็ก/อาคาร</span>
+            <input type="text" id="editTag" />
+          </label>
+        </div>
+        <div class="dialog__actions">
+          <button type="button" class="btn btn--danger" id="deleteBtn">ลบงานนี้</button>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn--ghost" id="cancelBtn">ยกเลิก</button>
+          <button type="submit" class="btn btn--primary">บันทึก</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
