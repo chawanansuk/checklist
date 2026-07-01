@@ -30,7 +30,14 @@ python3 -m http.server 8000
 ```
 > ถ้าดับเบิลคลิก `index.html` ตรง ๆ ตัวจดงานยังใช้ได้ แต่ PWA/ออฟไลน์/การเตือนของระบบจะไม่ทำงาน
 
-### วิธีที่ 3 — GitHub Pages
+### วิธีที่ 3 — Vercel (static ไม่ต้องตั้ง env)
+1. Vercel → **Add New → Project** → import repo `chawanansuk/checklist`
+   (import repo ตรง ๆ — **อย่าใช้ปุ่ม Deploy แบบ clone** เพราะจะสร้าง repo ใหม่)
+2. **Root Directory** → กด Edit → เลือกโฟลเดอร์ **`mychecklist`**
+3. Framework Preset: **Other** (ปล่อยอัตโนมัติ), ไม่ต้องใส่ Environment Variables ใด ๆ
+4. **Deploy** → ได้ลิงก์ `https://<ชื่อ>.vercel.app` ใช้ได้เลย
+
+### วิธีที่ 4 — GitHub Pages
 push โฟลเดอร์นี้ขึ้น repo → Settings → Pages → เลือก branch + โฟลเดอร์ → ได้ลิงก์ `https://<user>.github.io/...`
 
 ## ติดตั้งลงมือถือ (PWA)
