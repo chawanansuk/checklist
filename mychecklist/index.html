@@ -81,6 +81,17 @@
         <button class="tab" id="tabDone" role="tab" aria-selected="false">เสร็จแล้ว</button>
       </nav>
 
+      <!-- Search -->
+      <div class="searchbar">
+        <input
+          type="search"
+          id="searchInput"
+          class="searchbar__input"
+          placeholder="🔍 ค้นหางาน / แท็ก / โน้ต…"
+          aria-label="ค้นหา"
+        />
+      </div>
+
       <!-- Tag filter -->
       <div class="tagfilter" id="tagFilter" hidden></div>
 
@@ -117,6 +128,10 @@
             <input type="time" id="editTime" />
           </label>
         </div>
+        <label class="field">
+          <span>โน้ต (ไม่บังคับ)</span>
+          <textarea id="editNote" rows="2"></textarea>
+        </label>
         <div class="field-row">
           <label class="field">
             <span>ทำซ้ำ</span>

@@ -53,6 +53,7 @@
   let tasks = load();
   let currentTab = "open"; // 'open' | 'done'
   let activeTag = null; // tag filter
+  let searchQuery = ""; // free-text search
   let editingId = null;
   let toastTimer = null;
   let lastAction = null; // for undo
@@ -106,6 +107,7 @@
     time: $("timeInput"),
     repeat: $("repeatInput"),
     tag: $("tagInput"),
+    search: $("searchInput"),
     tabOpen: $("tabOpen"),
     tabDone: $("tabDone"),
     openCount: $("openCount"),
@@ -122,6 +124,7 @@
     editTime: $("editTime"),
     editRepeat: $("editRepeat"),
     editTag: $("editTag"),
+    editNote: $("editNote"),
     deleteBtn: $("deleteBtn"),
     cancelBtn: $("cancelBtn"),
   };
@@ -137,9 +140,20 @@
     else renderDone();
   }
 
+  function matchesSearch(t) {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (t.title || "").toLowerCase().includes(q) ||
+      (t.tag || "").toLowerCase().includes(q) ||
+      (t.note || "").toLowerCase().includes(q)
+    );
+  }
+
   function openTasks() {
     let list = tasks.filter((x) => !x.done);
     if (activeTag) list = list.filter((x) => (x.tag || "") === activeTag);
+    list = list.filter(matchesSearch);
     return list;
   }
 
@@ -249,6 +263,12 @@
     }
 
     body.append(title, meta);
+    if (task.note) {
+      const note = document.createElement("div");
+      note.className = "task__note";
+      note.textContent = task.note;
+      body.append(note);
+    }
     el.append(check, body);
     return el;
   }
@@ -306,6 +326,7 @@
     els.list.innerHTML = "";
     const list = tasks
       .filter((x) => x.done)
+      .filter(matchesSearch)
       .sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
     if (list.length === 0) {
       els.list.appendChild(emptyState("✅", "ยังไม่มีงานที่เสร็จ", "ติ๊กวงกลมหน้างานเพื่อทำเครื่องหมายเสร็จ"));
@@ -330,6 +351,7 @@
       time: data.time || "",
       repeat: data.repeat || "none",
       tag: data.tag || "",
+      note: "",
       done: false,
       doneAt: null,
       notifiedAt: null,
@@ -397,6 +419,7 @@
     els.editTime.value = t.time || "";
     els.editRepeat.value = t.repeat || "none";
     els.editTag.value = t.tag || "";
+    els.editNote.value = t.note || "";
     els.dialog.showModal();
   }
 
@@ -408,6 +431,7 @@
     t.time = els.editTime.value || "";
     t.repeat = els.editRepeat.value;
     t.tag = els.editTag.value.trim();
+    t.note = els.editNote.value.trim();
     t.notifiedAt = null; // re-arm notification after edits
     save();
     render();
@@ -610,6 +634,11 @@
     document.querySelectorAll(".chip[data-quick]").forEach((c) =>
       c.addEventListener("click", () => setQuick(c.dataset.quick)),
     );
+
+    els.search.addEventListener("input", () => {
+      searchQuery = els.search.value.trim();
+      render();
+    });
 
     els.tabOpen.addEventListener("click", () => switchTab("open"));
     els.tabDone.addEventListener("click", () => switchTab("done"));
