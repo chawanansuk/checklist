@@ -1,34 +1,17 @@
-/* MyChecklist — a single-user, offline, no-server checklist PWA.
- * All data lives in localStorage. No accounts, no backend. */
+/* MyChecklist v2 — single-user, offline, no-server checklist PWA.
+ * localStorage only. Features: list + calendar views, subtasks, inbox
+ * (no-date), stats/streak, per-task reminder lead, settings, dark mode. */
 
 (() => {
   "use strict";
 
   const STORAGE_KEY = "mychecklist.tasks.v1";
-  const THEME_KEY = "mychecklist.theme";
+  const SETTINGS_KEY = "mychecklist.settings.v1";
   const CHECK_INTERVAL_MS = 30_000;
-
-  // ---------- Theme (light / dark / follow-system) ----------
-  const systemDark = () =>
-    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  const storedTheme = () => localStorage.getItem(THEME_KEY); // 'light' | 'dark' | null
-  const effectiveDark = () => {
-    const t = storedTheme();
-    return t ? t === "dark" : systemDark();
-  };
-  function applyTheme() {
-    const t = storedTheme();
-    if (t) document.documentElement.dataset.theme = t;
-    else document.documentElement.removeAttribute("data-theme");
-    if (els.theme) els.theme.textContent = effectiveDark() ? "☀️" : "🌙";
-  }
-  function toggleTheme() {
-    localStorage.setItem(THEME_KEY, effectiveDark() ? "light" : "dark");
-    applyTheme();
-  }
 
   // ---------- Thai date helpers ----------
   const TH_DAYS = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+  const TH_DAYS_MIN = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
   const TH_MONTHS = [
     "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
     "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
@@ -38,152 +21,163 @@
     "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
   ];
 
-  /** Local YYYY-MM-DD for a Date (not UTC). */
-  const toISODate = (d) => {
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  };
+  const p2 = (n) => String(n).padStart(2, "0");
+  const toISODate = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
   const todayISO = () => toISODate(new Date());
   const parseISO = (s) => {
     const [y, m, d] = s.split("-").map(Number);
     return new Date(y, m - 1, d);
   };
-  /** Whole-day difference b - a (by calendar date). */
-  const dayDiff = (aISO, bISO) =>
-    Math.round((parseISO(bISO) - parseISO(aISO)) / 86_400_000);
-
+  const dayDiff = (aISO, bISO) => Math.round((parseISO(bISO) - parseISO(aISO)) / 86_400_000);
   const beYear = (d) => d.getFullYear() + 543;
-
   const fmtFullToday = (d) =>
     `วัน${TH_DAYS[d.getDay()]}ที่ ${d.getDate()} ${TH_MONTHS[d.getMonth()]} ${beYear(d)}`;
 
-  /** Human label for a due date relative to today. */
   const relLabel = (iso) => {
     const diff = dayDiff(todayISO(), iso);
     if (diff === 0) return "วันนี้";
     if (diff === 1) return "พรุ่งนี้";
     if (diff === -1) return "เมื่อวาน";
     const d = parseISO(iso);
-    const base = `${TH_DAYS[d.getDay()]} ${d.getDate()} ${TH_MONTHS_SHORT[d.getMonth()]}`;
+    const base = `${TH_DAYS_MIN[d.getDay()]} ${d.getDate()} ${TH_MONTHS_SHORT[d.getMonth()]}`;
     if (diff > 1) return `${base} · อีก ${diff} วัน`;
     return base;
   };
 
   // ---------- State ----------
   let tasks = load();
-  let currentTab = "open"; // 'open' | 'done'
-  let activeTag = null; // tag filter
-  let searchQuery = ""; // free-text search
+  let settings = loadSettings();
+  let currentTab = "open";
+  let currentView = "list"; // 'list' | 'calendar'
+  let activeTag = null;
+  let searchQuery = "";
   let editingId = null;
+  let editSubtasks = [];
+  let calMonth = startOfMonth(new Date());
+  let calSelected = todayISO();
   let toastTimer = null;
-  let lastAction = null; // for undo
 
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
+      const arr = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      if (!Array.isArray(arr)) return [];
+      return arr.map(migrate);
     } catch {
       return [];
     }
   }
+  function migrate(t) {
+    return {
+      ...t,
+      subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
+      leadHours: typeof t.leadHours === "number" ? t.leadHours : 0,
+      important: Boolean(t.important),
+      note: t.note || "",
+      tag: t.tag || "",
+      date: t.date == null ? "" : t.date,
+      time: t.time || "",
+      repeat: t.repeat || "none",
+    };
+  }
   function save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
   }
-  const uid = () =>
-    Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  function loadSettings() {
+    let s = {};
+    try {
+      s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    } catch {
+      s = {};
+    }
+    return {
+      theme: s.theme || "auto",
+      defaultLead: typeof s.defaultLead === "number" ? s.defaultLead : 0,
+      weekStart: s.weekStart === 0 ? 0 : 1,
+      sort: s.sort || "date",
+    };
+  }
+  function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  function startOfMonth(d) {
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
+  // ---------- Theme ----------
+  const systemDark = () =>
+    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const effectiveDark = () =>
+    settings.theme === "dark" || (settings.theme === "auto" && systemDark());
+  function applyTheme() {
+    if (settings.theme === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.dataset.theme = settings.theme;
+  }
 
   // ---------- Recurrence ----------
   function nextDate(iso, repeat) {
+    if (!iso) return null;
     const d = parseISO(iso);
     switch (repeat) {
-      case "daily":
-        d.setDate(d.getDate() + 1);
-        break;
-      case "weekly":
-        d.setDate(d.getDate() + 7);
-        break;
-      case "monthly":
-        d.setMonth(d.getMonth() + 1);
-        break;
-      case "yearly":
-        d.setFullYear(d.getFullYear() + 1);
-        break;
-      default:
-        return null;
+      case "daily": d.setDate(d.getDate() + 1); break;
+      case "weekly": d.setDate(d.getDate() + 7); break;
+      case "monthly": d.setMonth(d.getMonth() + 1); break;
+      case "yearly": d.setFullYear(d.getFullYear() + 1); break;
+      default: return null;
     }
     return toISODate(d);
   }
 
-  // ---------- DOM refs ----------
+  // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
   const els = {
-    today: $("todayLabel"),
-    summary: $("summaryLabel"),
-    bell: $("bellBtn"),
-    theme: $("themeBtn"),
-    form: $("quickAddForm"),
-    title: $("titleInput"),
-    date: $("dateInput"),
-    time: $("timeInput"),
-    repeat: $("repeatInput"),
-    tag: $("tagInput"),
-    search: $("searchInput"),
-    tabOpen: $("tabOpen"),
-    tabDone: $("tabDone"),
-    openCount: $("openCount"),
-    doneCount: $("doneCount"),
-    tagFilter: $("tagFilter"),
-    list: $("list"),
+    today: $("todayLabel"), summary: $("summaryLabel"), stats: $("statsLabel"),
+    settingsBtn: $("settingsBtn"), bell: $("bellBtn"),
+    form: $("quickAddForm"), title: $("titleInput"), date: $("dateInput"),
+    time: $("timeInput"), repeat: $("repeatInput"), tag: $("tagInput"),
+    viewList: $("viewList"), viewCal: $("viewCal"),
+    listView: $("listView"), calView: $("calView"),
+    tabOpen: $("tabOpen"), tabDone: $("tabDone"),
+    openCount: $("openCount"), doneCount: $("doneCount"),
+    sortSelect: $("sortSelect"), search: $("searchInput"),
+    tagFilter: $("tagFilter"), list: $("list"),
+    calPrev: $("calPrev"), calNext: $("calNext"), calToday: $("calToday"),
+    calTitle: $("calTitle"), calGrid: $("calGrid"), calDay: $("calDay"),
+    exportBtn: $("exportBtn"), importBtn: $("importBtn"), importFile: $("importFile"),
     toast: $("toast"),
-    exportBtn: $("exportBtn"),
-    importBtn: $("importBtn"),
-    importFile: $("importFile"),
-    dialog: $("editDialog"),
-    editForm: $("editForm"),
-    editTitle: $("editTitle"),
-    editDate: $("editDate"),
-    editTime: $("editTime"),
-    editRepeat: $("editRepeat"),
-    editTag: $("editTag"),
-    editNote: $("editNote"),
-    editImportant: $("editImportant"),
-    deleteBtn: $("deleteBtn"),
-    cancelBtn: $("cancelBtn"),
+    dialog: $("editDialog"), editForm: $("editForm"),
+    editTitle: $("editTitle"), editDate: $("editDate"), editTime: $("editTime"),
+    editRepeat: $("editRepeat"), editLead: $("editLead"), editTag: $("editTag"),
+    editNote: $("editNote"), editImportant: $("editImportant"),
+    subList: $("subList"), subInput: $("subInput"), subAddBtn: $("subAddBtn"),
+    deleteBtn: $("deleteBtn"), cancelBtn: $("cancelBtn"),
+    settingsDialog: $("settingsDialog"), setTheme: $("setTheme"),
+    setLead: $("setLead"), setWeekStart: $("setWeekStart"), clearAllBtn: $("clearAllBtn"),
   };
 
   // ---------- Rendering ----------
   function render() {
-    const t = new Date();
-    els.today.textContent = fmtFullToday(t);
+    els.today.textContent = fmtFullToday(new Date());
     renderSummary();
-    renderTagFilter();
-
-    if (currentTab === "open") renderOpen();
-    else renderDone();
+    renderStats();
+    if (currentView === "list") {
+      els.listView.hidden = false;
+      els.calView.hidden = true;
+      renderTagFilter();
+      currentTab === "open" ? renderOpen() : renderDone();
+    } else {
+      els.listView.hidden = true;
+      els.calView.hidden = false;
+      renderCalendar();
+    }
   }
 
-  function matchesSearch(t) {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      (t.title || "").toLowerCase().includes(q) ||
-      (t.tag || "").toLowerCase().includes(q) ||
-      (t.note || "").toLowerCase().includes(q)
-    );
-  }
-
-  function openTasks() {
-    let list = tasks.filter((x) => !x.done);
-    if (activeTag) list = list.filter((x) => (x.tag || "") === activeTag);
-    list = list.filter(matchesSearch);
-    return list;
-  }
+  const openList = () => tasks.filter((x) => !x.done);
 
   function renderSummary() {
     const today = todayISO();
-    const open = tasks.filter((x) => !x.done);
-    const overdue = open.filter((x) => dayDiff(x.date, today) > 0).length;
+    const open = openList();
+    const overdue = open.filter((x) => x.date && dayDiff(x.date, today) > 0).length;
     const dueToday = open.filter((x) => x.date === today).length;
     els.openCount.textContent = String(open.length);
     els.openCount.dataset.zero = open.length === 0 ? "true" : "false";
@@ -203,9 +197,38 @@
     els.summary.textContent = msg;
   }
 
+  function renderStats() {
+    const doneDates = new Set(
+      tasks.filter((x) => x.done && x.doneAt).map((x) => toISODate(new Date(x.doneAt))),
+    );
+    if (doneDates.size === 0) {
+      els.stats.textContent = "";
+      return;
+    }
+    // Streak: consecutive days up to today (or yesterday) with a completion.
+    let streak = 0;
+    const cur = new Date();
+    if (!doneDates.has(toISODate(cur))) cur.setDate(cur.getDate() - 1);
+    while (doneDates.has(toISODate(cur))) {
+      streak++;
+      cur.setDate(cur.getDate() - 1);
+    }
+    // Completed in the last 7 days.
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 6);
+    const weekDone = tasks.filter(
+      (x) => x.done && x.doneAt && new Date(x.doneAt) >= new Date(toISODate(weekAgo)),
+    ).length;
+
+    const parts = [];
+    if (streak > 0) parts.push(`🔥 ต่อเนื่อง ${streak} วัน`);
+    parts.push(`✅ 7 วันล่าสุด ${weekDone}`);
+    els.stats.textContent = parts.join(" · ");
+  }
+
   function renderTagFilter() {
     const tags = [...new Set(tasks.filter((x) => x.tag).map((x) => x.tag))].sort();
-    if (tags.length === 0) {
+    if (!tags.length) {
       els.tagFilter.hidden = true;
       els.tagFilter.innerHTML = "";
       return;
@@ -226,9 +249,39 @@
     tags.forEach((tag) => els.tagFilter.appendChild(mk("# " + tag, tag)));
   }
 
+  function matchesSearch(t) {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (t.title || "").toLowerCase().includes(q) ||
+      (t.tag || "").toLowerCase().includes(q) ||
+      (t.note || "").toLowerCase().includes(q) ||
+      (t.subtasks || []).some((s) => (s.title || "").toLowerCase().includes(q))
+    );
+  }
+
+  function comparator() {
+    const imp = (a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0);
+    const dt = (a, b) => (a.date || "9999-99-99").localeCompare(b.date || "9999-99-99");
+    const tm = (a, b) => (a.time || "").localeCompare(b.time || "");
+    if (settings.sort === "important") return (a, b) => imp(a, b) || dt(a, b) || tm(a, b);
+    if (settings.sort === "created") return (a, b) => (b.createdAt || "").localeCompare(a.createdAt || "");
+    return (a, b) => dt(a, b) || imp(a, b) || tm(a, b);
+  }
+
+  const repeatLabel = (r) =>
+    ({ daily: "ทุกวัน", weekly: "ทุกสัปดาห์", monthly: "ทุกเดือน", yearly: "ทุกปี" }[r] || "");
+
+  function groupHeader(label, overdue = false) {
+    const h = document.createElement("div");
+    h.className = "group__label" + (overdue ? " group__label--overdue" : "");
+    h.textContent = label;
+    return h;
+  }
+
   function taskEl(task) {
     const today = todayISO();
-    const overdue = !task.done && dayDiff(task.date, today) > 0;
+    const overdue = !task.done && task.date && dayDiff(task.date, today) > 0;
 
     const el = document.createElement("div");
     el.className =
@@ -237,7 +290,7 @@
       (overdue ? " task--overdue" : "") +
       (task.important && !task.done ? " task--important" : "");
     el.onclick = (e) => {
-      if (e.target.closest(".task__check")) return;
+      if (e.target.closest(".task__check") || e.target.closest(".task__star")) return;
       openEdit(task.id);
     };
 
@@ -251,59 +304,56 @@
 
     const body = document.createElement("div");
     body.className = "task__body";
-
     const title = document.createElement("div");
     title.className = "task__title";
     title.textContent = task.title;
+    body.appendChild(title);
 
     const meta = document.createElement("div");
     meta.className = "task__meta";
-
     if (overdue) {
-      const b = document.createElement("span");
-      b.className = "task__badge task__badge--overdue";
-      b.textContent = `เลยมา ${dayDiff(task.date, today)} วัน`;
-      meta.appendChild(b);
-    } else if (!task.done) {
-      const s = document.createElement("span");
-      s.textContent = relLabel(task.date);
-      meta.appendChild(s);
+      meta.appendChild(badge(`เลยมา ${dayDiff(task.date, today)} วัน`, "overdue"));
+    } else if (!task.done && task.date) {
+      meta.appendChild(plain(relLabel(task.date)));
+    } else if (!task.done && !task.date) {
+      meta.appendChild(badge("ไม่มีกำหนด", "inbox"));
     } else if (task.doneAt) {
-      const s = document.createElement("span");
-      s.textContent = "เสร็จเมื่อ " + relLabel(toISODate(new Date(task.doneAt)));
-      meta.appendChild(s);
+      meta.appendChild(plain("เสร็จเมื่อ " + relLabel(toISODate(new Date(task.doneAt)))));
+    }
+    if (task.time) meta.appendChild(plain("🕒 " + task.time));
+    if (task.repeat && task.repeat !== "none") meta.appendChild(badge("↻ " + repeatLabel(task.repeat), "repeat"));
+    if (task.tag) meta.appendChild(badge("# " + task.tag, "tag"));
+    body.appendChild(meta);
+
+    // Subtask progress
+    if (task.subtasks && task.subtasks.length) {
+      const doneN = task.subtasks.filter((s) => s.done).length;
+      const prog = document.createElement("div");
+      prog.className = "task__prog";
+      const bar = document.createElement("div");
+      bar.className = "task__prog-bar";
+      const fill = document.createElement("div");
+      fill.className = "task__prog-fill";
+      fill.style.width = `${Math.round((doneN / task.subtasks.length) * 100)}%`;
+      bar.appendChild(fill);
+      const lbl = document.createElement("span");
+      lbl.className = "task__prog-lbl";
+      lbl.textContent = `☑ ${doneN}/${task.subtasks.length}`;
+      prog.append(bar, lbl);
+      body.appendChild(prog);
     }
 
-    if (task.time) {
-      const s = document.createElement("span");
-      s.textContent = "🕒 " + task.time;
-      meta.appendChild(s);
-    }
-    if (task.repeat && task.repeat !== "none") {
-      const b = document.createElement("span");
-      b.className = "task__badge task__badge--repeat";
-      b.textContent = "↻ " + repeatLabel(task.repeat);
-      meta.appendChild(b);
-    }
-    if (task.tag) {
-      const b = document.createElement("span");
-      b.className = "task__badge task__badge--tag";
-      b.textContent = "# " + task.tag;
-      meta.appendChild(b);
-    }
-
-    body.append(title, meta);
     if (task.note) {
       const note = document.createElement("div");
       note.className = "task__note";
       note.textContent = task.note;
-      body.append(note);
+      body.appendChild(note);
     }
+
     const star = document.createElement("button");
     star.className = "task__star" + (task.important ? " is-on" : "");
     star.textContent = task.important ? "★" : "☆";
     star.title = task.important ? "เอาออกจากงานสำคัญ" : "ทำเครื่องหมายว่าสำคัญ";
-    star.setAttribute("aria-label", star.title);
     star.onclick = (e) => {
       e.stopPropagation();
       toggleImportant(task.id);
@@ -312,37 +362,33 @@
     el.append(check, body, star);
     return el;
   }
-
-  const repeatLabel = (r) =>
-    ({ daily: "ทุกวัน", weekly: "ทุกสัปดาห์", monthly: "ทุกเดือน", yearly: "ทุกปี" }[r] || "");
-
-  function groupHeader(label, overdue = false) {
-    const h = document.createElement("div");
-    h.className = "group__label" + (overdue ? " group__label--overdue" : "");
-    h.textContent = label;
-    return h;
+  function badge(text, kind) {
+    const b = document.createElement("span");
+    b.className = "task__badge task__badge--" + kind;
+    b.textContent = text;
+    return b;
+  }
+  function plain(text) {
+    const s = document.createElement("span");
+    s.textContent = text;
+    return s;
   }
 
   function renderOpen() {
     els.list.innerHTML = "";
     const today = todayISO();
-    const list = openTasks().sort(
-      (a, b) =>
-        a.date.localeCompare(b.date) ||
-        (b.important ? 1 : 0) - (a.important ? 1 : 0) ||
-        (a.time || "").localeCompare(b.time || ""),
-    );
+    let list = openList().filter(matchesSearch);
+    if (activeTag) list = list.filter((x) => (x.tag || "") === activeTag);
 
     if (list.length === 0) {
-      els.list.appendChild(
-        emptyState("📝", "ยังไม่มีงานค้าง", "พิมพ์งานด้านบนแล้วกด Enter เพื่อเริ่มเลย"),
-      );
+      els.list.appendChild(emptyState("📝", "ยังไม่มีงานค้าง", "พิมพ์งานด้านบนแล้วกด Enter เพื่อเริ่มเลย"));
       return;
     }
-
-    const overdue = list.filter((x) => dayDiff(x.date, today) > 0);
-    const todayList = list.filter((x) => x.date === today);
-    const upcoming = list.filter((x) => dayDiff(x.date, today) < 0); // future
+    const cmp = comparator();
+    const overdue = list.filter((x) => x.date && dayDiff(x.date, today) > 0).sort(cmp);
+    const todayList = list.filter((x) => x.date === today).sort(cmp);
+    const upcoming = list.filter((x) => x.date && dayDiff(x.date, today) < 0).sort(cmp);
+    const inbox = list.filter((x) => !x.date).sort(cmp);
 
     if (overdue.length) {
       els.list.appendChild(groupHeader("เลยกำหนด", true));
@@ -353,29 +399,35 @@
       todayList.forEach((t) => els.list.appendChild(taskEl(t)));
     }
     if (upcoming.length) {
-      // Group upcoming by date.
-      let lastDate = null;
-      upcoming.forEach((t) => {
-        if (t.date !== lastDate) {
-          els.list.appendChild(groupHeader(relLabel(t.date)));
-          lastDate = t.date;
-        }
-        els.list.appendChild(taskEl(t));
-      });
+      if (settings.sort === "date") {
+        let last = null;
+        upcoming.forEach((t) => {
+          if (t.date !== last) {
+            els.list.appendChild(groupHeader(relLabel(t.date)));
+            last = t.date;
+          }
+          els.list.appendChild(taskEl(t));
+        });
+      } else {
+        els.list.appendChild(groupHeader("ถัดไป"));
+        upcoming.forEach((t) => els.list.appendChild(taskEl(t)));
+      }
+    }
+    if (inbox.length) {
+      els.list.appendChild(groupHeader("📥 ไม่มีกำหนด"));
+      inbox.forEach((t) => els.list.appendChild(taskEl(t)));
     }
   }
 
   function renderDone() {
     els.list.innerHTML = "";
-    const list = tasks
-      .filter((x) => x.done)
-      .filter(matchesSearch)
-      .sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
+    let list = tasks.filter((x) => x.done).filter(matchesSearch);
+    if (activeTag) list = list.filter((x) => (x.tag || "") === activeTag);
+    list.sort((a, b) => (b.doneAt || "").localeCompare(a.doneAt || ""));
     if (list.length === 0) {
       els.list.appendChild(emptyState("✅", "ยังไม่มีงานที่เสร็จ", "ติ๊กวงกลมหน้างานเพื่อทำเครื่องหมายเสร็จ"));
       return;
     }
-
     const bar = document.createElement("div");
     bar.className = "cleardone";
     const clearBtn = document.createElement("button");
@@ -383,7 +435,6 @@
     clearBtn.onclick = clearCompleted;
     bar.appendChild(clearBtn);
     els.list.appendChild(bar);
-
     list.forEach((t) => els.list.appendChild(taskEl(t)));
   }
 
@@ -394,16 +445,102 @@
     return d;
   }
 
+  // ---------- Calendar ----------
+  function renderCalendar() {
+    els.calTitle.textContent = `${TH_MONTHS[calMonth.getMonth()]} ${beYear(calMonth)}`;
+    els.calGrid.innerHTML = "";
+
+    const ws = settings.weekStart; // 0 Sun or 1 Mon
+    const headOrder = [...Array(7)].map((_, i) => (ws + i) % 7);
+    headOrder.forEach((wd) => {
+      const h = document.createElement("div");
+      h.className = "cal__wd";
+      h.textContent = TH_DAYS_MIN[wd];
+      els.calGrid.appendChild(h);
+    });
+
+    const first = startOfMonth(calMonth);
+    const startPad = (first.getDay() - ws + 7) % 7;
+    const daysInMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0).getDate();
+    const today = todayISO();
+
+    // counts per date (open tasks)
+    const counts = {};
+    openList().forEach((t) => {
+      if (!t.date) return;
+      counts[t.date] = (counts[t.date] || 0) + 1;
+    });
+
+    for (let i = 0; i < startPad; i++) {
+      const c = document.createElement("div");
+      c.className = "cal__cell cal__cell--pad";
+      els.calGrid.appendChild(c);
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = `${calMonth.getFullYear()}-${p2(calMonth.getMonth() + 1)}-${p2(day)}`;
+      const c = document.createElement("button");
+      c.className = "cal__cell";
+      if (iso === today) c.classList.add("cal__cell--today");
+      if (iso === calSelected) c.classList.add("cal__cell--sel");
+      const n = counts[iso] || 0;
+      const isOverdue = n > 0 && dayDiff(iso, today) > 0;
+      c.innerHTML =
+        `<span class="cal__num">${day}</span>` +
+        (n ? `<span class="cal__dot ${isOverdue ? "cal__dot--overdue" : ""}">${n}</span>` : "");
+      c.onclick = () => {
+        calSelected = iso;
+        renderCalendar();
+      };
+      els.calGrid.appendChild(c);
+    }
+
+    renderCalDay();
+  }
+
+  function renderCalDay() {
+    els.calDay.innerHTML = "";
+    const head = document.createElement("div");
+    head.className = "cal__day-head";
+    const d = parseISO(calSelected);
+    head.innerHTML = `<span>${TH_DAYS[d.getDay()]} ${d.getDate()} ${TH_MONTHS[d.getMonth()]}</span>`;
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn btn--ghost";
+    addBtn.textContent = "+ เพิ่มในวันนี้";
+    addBtn.onclick = () => {
+      els.date.value = calSelected;
+      switchView("list");
+      els.title.focus();
+      els.title.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    head.appendChild(addBtn);
+    els.calDay.appendChild(head);
+
+    const dayTasks = tasks
+      .filter((t) => t.date === calSelected)
+      .sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) || (a.time || "").localeCompare(b.time || ""));
+    if (dayTasks.length === 0) {
+      const e = document.createElement("div");
+      e.className = "cal__empty";
+      e.textContent = "ไม่มีงานในวันนี้";
+      els.calDay.appendChild(e);
+      return;
+    }
+    dayTasks.forEach((t) => els.calDay.appendChild(taskEl(t)));
+  }
+
   // ---------- Actions ----------
   function addTask(data) {
     tasks.push({
       id: uid(),
       title: data.title,
-      date: data.date || todayISO(),
+      // "" means an inbox (no-date) task; undefined falls back to today.
+      date: data.date === "none" ? "" : data.date != null ? data.date : todayISO(),
       time: data.time || "",
       repeat: data.repeat || "none",
+      leadHours: settings.defaultLead,
       tag: data.tag || "",
       note: "",
+      subtasks: [],
       important: false,
       done: false,
       doneAt: null,
@@ -412,33 +549,25 @@
     });
     save();
     render();
+    scheduleTriggers();
   }
 
   function toggleDone(id) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
-
     if (!t.done) {
       t.done = true;
       t.doneAt = new Date().toISOString();
       if (navigator.vibrate) navigator.vibrate(15);
-      // Spawn next occurrence for repeating tasks.
-      if (t.repeat && t.repeat !== "none") {
+      if (t.repeat && t.repeat !== "none" && t.date) {
         const nd = nextDate(t.date, t.repeat);
         if (nd) {
           tasks.push({
-            id: uid(),
-            title: t.title,
-            date: nd,
-            time: t.time,
-            repeat: t.repeat,
-            tag: t.tag,
-            note: t.note || "",
-            important: t.important || false,
-            done: false,
-            doneAt: null,
-            notifiedAt: null,
-            createdAt: new Date().toISOString(),
+            id: uid(), title: t.title, date: nd, time: t.time, repeat: t.repeat,
+            leadHours: t.leadHours || 0, tag: t.tag, note: t.note || "",
+            subtasks: (t.subtasks || []).map((s) => ({ id: uid(), title: s.title, done: false })),
+            important: t.important || false, done: false, doneAt: null,
+            notifiedAt: null, createdAt: new Date().toISOString(),
           });
         }
       }
@@ -447,12 +576,9 @@
       showToast("ทำเสร็จแล้ว", "เลิกทำ", () => {
         t.done = false;
         t.doneAt = null;
-        // Remove the auto-spawned next occurrence (best effort: newest same-title future).
-        if (t.repeat && t.repeat !== "none") {
+        if (t.repeat && t.repeat !== "none" && t.date) {
           const nd = nextDate(t.date, t.repeat);
-          const idx = tasks.findIndex(
-            (x) => !x.done && x.title === t.title && x.date === nd && x.tag === t.tag,
-          );
+          const idx = tasks.findIndex((x) => !x.done && x.title === t.title && x.date === nd && x.tag === t.tag);
           if (idx >= 0) tasks.splice(idx, 1);
         }
         save();
@@ -476,7 +602,7 @@
 
   function clearCompleted() {
     const removed = tasks.filter((x) => x.done);
-    if (removed.length === 0) return;
+    if (!removed.length) return;
     tasks = tasks.filter((x) => !x.done);
     save();
     render();
@@ -487,33 +613,75 @@
     });
   }
 
+  // ---------- Edit dialog ----------
   function openEdit(id) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
     editingId = id;
+    editSubtasks = (t.subtasks || []).map((s) => ({ ...s }));
     els.editTitle.value = t.title;
-    els.editDate.value = t.date;
+    els.editDate.value = t.date || "";
     els.editTime.value = t.time || "";
     els.editRepeat.value = t.repeat || "none";
+    els.editLead.value = String(t.leadHours || 0);
     els.editTag.value = t.tag || "";
     els.editNote.value = t.note || "";
     els.editImportant.checked = Boolean(t.important);
+    renderSubEditor();
     els.dialog.showModal();
+  }
+
+  function renderSubEditor() {
+    els.subList.innerHTML = "";
+    editSubtasks.forEach((s, i) => {
+      const row = document.createElement("div");
+      row.className = "subitem";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = s.done;
+      cb.onchange = () => (editSubtasks[i].done = cb.checked);
+      const txt = document.createElement("input");
+      txt.type = "text";
+      txt.value = s.title;
+      txt.className = "subitem__txt";
+      txt.oninput = () => (editSubtasks[i].title = txt.value);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "subitem__rm";
+      rm.textContent = "✕";
+      rm.onclick = () => {
+        editSubtasks.splice(i, 1);
+        renderSubEditor();
+      };
+      row.append(cb, txt, rm);
+      els.subList.appendChild(row);
+    });
+  }
+  function addSubtask() {
+    const v = els.subInput.value.trim();
+    if (!v) return;
+    editSubtasks.push({ id: uid(), title: v, done: false });
+    els.subInput.value = "";
+    renderSubEditor();
+    els.subInput.focus();
   }
 
   function saveEdit() {
     const t = tasks.find((x) => x.id === editingId);
     if (!t) return;
     t.title = els.editTitle.value.trim() || t.title;
-    t.date = els.editDate.value || t.date;
+    t.date = els.editDate.value || "";
     t.time = els.editTime.value || "";
     t.repeat = els.editRepeat.value;
+    t.leadHours = parseInt(els.editLead.value, 10) || 0;
     t.tag = els.editTag.value.trim();
     t.note = els.editNote.value.trim();
     t.important = els.editImportant.checked;
-    t.notifiedAt = null; // re-arm notification after edits
+    t.subtasks = editSubtasks.filter((s) => (s.title || "").trim());
+    t.notifiedAt = null;
     save();
     render();
+    scheduleTriggers();
   }
 
   function deleteTask(id) {
@@ -549,105 +717,82 @@
     els.toast.hidden = false;
     toastTimer = setTimeout(hideToast, 5000);
   }
-  function hideToast() {
-    els.toast.hidden = true;
-  }
+  const hideToast = () => (els.toast.hidden = true);
 
   // ---------- Notifications ----------
   function updateBellUI() {
     const granted = "Notification" in window && Notification.permission === "granted";
     els.bell.classList.toggle("is-on", granted);
   }
-
   async function requestNotifications() {
-    if (!("Notification" in window)) {
-      showToast("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");
-      return;
-    }
+    if (!("Notification" in window)) return showToast("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");
     const perm = await Notification.requestPermission();
     updateBellUI();
-    if (perm === "granted") {
-      showToast("เปิดการแจ้งเตือนแล้ว");
-      scheduleTriggers();
-    } else {
-      showToast("ยังไม่ได้อนุญาตการแจ้งเตือน");
-    }
+    showToast(perm === "granted" ? "เปิดการแจ้งเตือนแล้ว" : "ยังไม่ได้อนุญาตการแจ้งเตือน");
+    if (perm === "granted") scheduleTriggers();
   }
-
-  /** Fires when a task is due/overdue while the app is open. */
+  function dueDateTimeMs(t) {
+    if (!t.date) return null;
+    const d = parseISO(t.date);
+    if (t.time) {
+      const [h, m] = t.time.split(":").map(Number);
+      d.setHours(h, m, 0, 0);
+    }
+    return d.getTime();
+  }
   function checkDue() {
     const today = todayISO();
-    const now = new Date();
-    const nowHM = `${String(now.getHours()).padStart(2, "0")}:${String(
-      now.getMinutes(),
-    ).padStart(2, "0")}`;
-
-    let dueMsg = null;
+    const now = Date.now();
+    let fired = null;
     tasks.forEach((t) => {
-      if (t.done) return;
-      const isDay = dayDiff(t.date, today) >= 0; // today or overdue
-      if (!isDay) return;
-      const timeReached = !t.time || t.time <= nowHM || dayDiff(t.date, today) > 0;
-      if (timeReached && t.notifiedAt !== today) {
+      if (t.done || !t.date) return;
+      const due = dueDateTimeMs(t);
+      if (due == null) return;
+      const notifyAt = due - (t.leadHours || 0) * 3_600_000;
+      if (now >= notifyAt && t.notifiedAt !== today) {
         t.notifiedAt = today;
-        dueMsg = t.title;
+        fired = t.title;
         systemNotify(t);
       }
     });
-    if (dueMsg) {
+    if (fired) {
       save();
-      showToast("ถึงกำหนด: " + dueMsg);
+      showToast("ถึงกำหนด: " + fired);
       render();
     }
   }
-
   function systemNotify(task) {
     if ("Notification" in window && Notification.permission === "granted") {
       try {
         new Notification("MyChecklist", {
           body: task.title + (task.time ? " (" + task.time + ")" : ""),
-          tag: task.id,
-          icon: "icons/icon-192.png",
+          tag: task.id, icon: "icons/icon-192.png",
         });
-      } catch {
-        /* some browsers require SW for notifications; in-app toast still fires */
-      }
+      } catch {}
     }
   }
-
-  /** Progressive enhancement: schedule OS notifications ahead of time
-   *  via the service worker's Notification Triggers (Chrome/Android). */
   async function scheduleTriggers() {
     if (!("serviceWorker" in navigator)) return;
     const reg = await navigator.serviceWorker.ready.catch(() => null);
-    if (!reg || !("showTrigger" in Notification.prototype)) return; // unsupported (e.g. iOS)
-
+    if (!reg || !("showTrigger" in Notification.prototype)) return;
     const now = Date.now();
     for (const t of tasks) {
-      if (t.done || !t.time) continue;
-      const when = parseISO(t.date);
-      const [h, m] = t.time.split(":").map(Number);
-      when.setHours(h, m, 0, 0);
-      if (when.getTime() <= now) continue;
+      if (t.done || !t.date) continue;
+      const due = dueDateTimeMs(t);
+      const at = due - (t.leadHours || 0) * 3_600_000;
+      if (at <= now) continue;
       try {
         await reg.showNotification("MyChecklist", {
-          tag: "trigger-" + t.id,
-          body: t.title,
-          icon: "icons/icon-192.png",
-          // eslint-disable-next-line no-undef
-          showTrigger: new TimestampTrigger(when.getTime()),
+          tag: "trigger-" + t.id, body: t.title, icon: "icons/icon-192.png",
+          showTrigger: new TimestampTrigger(at), // eslint-disable-line no-undef
         });
-      } catch {
-        /* ignore unsupported */
-      }
+      } catch {}
     }
   }
 
   // ---------- Backup ----------
   function exportData() {
-    const blob = new Blob([JSON.stringify(tasks, null, 2)], {
-      type: "application/json",
-    });
+    const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -655,17 +800,15 @@
     a.click();
     URL.revokeObjectURL(url);
   }
-
   function importData(file) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const arr = JSON.parse(reader.result);
         if (!Array.isArray(arr)) throw new Error("bad");
-        // Merge by id (imported wins).
         const map = new Map(tasks.map((t) => [t.id, t]));
         arr.forEach((t) => {
-          if (t && t.id && t.title) map.set(t.id, t);
+          if (t && t.id && t.title) map.set(t.id, migrate(t));
         });
         tasks = [...map.values()];
         save();
@@ -678,62 +821,115 @@
     reader.readAsText(file);
   }
 
-  // ---------- Quick-date chips ----------
+  // ---------- Settings ----------
+  function openSettings() {
+    els.setTheme.value = settings.theme;
+    els.setLead.value = String(settings.defaultLead);
+    els.setWeekStart.value = String(settings.weekStart);
+    els.settingsDialog.showModal();
+  }
+
+  // ---------- View switch ----------
+  function switchView(v) {
+    currentView = v;
+    els.viewList.classList.toggle("viewswitch__btn--active", v === "list");
+    els.viewCal.classList.toggle("viewswitch__btn--active", v === "calendar");
+    render();
+  }
+  function switchTab(tab) {
+    currentTab = tab;
+    els.tabOpen.classList.toggle("tab--active", tab === "open");
+    els.tabDone.classList.toggle("tab--active", tab === "done");
+    els.tabOpen.setAttribute("aria-selected", tab === "open");
+    els.tabDone.setAttribute("aria-selected", tab === "done");
+    render();
+  }
+
   function setQuick(kind) {
+    if (kind === "none") {
+      els.date.value = "";
+      return;
+    }
     const d = new Date();
     if (kind === "tomorrow") d.setDate(d.getDate() + 1);
     if (kind === "week") d.setDate(d.getDate() + 7);
     els.date.value = toISODate(d);
   }
 
-  // ---------- Wire up ----------
+  // ---------- Init ----------
   function init() {
+    applyTheme();
+    els.sortSelect.value = settings.sort;
     els.date.value = todayISO();
 
     els.form.addEventListener("submit", (e) => {
       e.preventDefault();
       const title = els.title.value.trim();
       if (!title) return;
-      addTask({
-        title,
-        date: els.date.value,
-        time: els.time.value,
-        repeat: els.repeat.value,
-        tag: els.tag.value.trim(),
-      });
+      addTask({ title, date: els.date.value, time: els.time.value, repeat: els.repeat.value, tag: els.tag.value.trim() });
       els.title.value = "";
       els.time.value = "";
       els.tag.value = "";
       els.repeat.value = "none";
       els.date.value = todayISO();
       els.title.focus();
-      scheduleTriggers();
     });
-
     document.querySelectorAll(".chip[data-quick]").forEach((c) =>
       c.addEventListener("click", () => setQuick(c.dataset.quick)),
     );
 
+    els.viewList.addEventListener("click", () => switchView("list"));
+    els.viewCal.addEventListener("click", () => switchView("calendar"));
+    els.tabOpen.addEventListener("click", () => switchTab("open"));
+    els.tabDone.addEventListener("click", () => switchTab("done"));
+    els.sortSelect.addEventListener("change", () => {
+      settings.sort = els.sortSelect.value;
+      saveSettings();
+      render();
+    });
     els.search.addEventListener("input", () => {
       searchQuery = els.search.value.trim();
       render();
     });
 
-    els.tabOpen.addEventListener("click", () => switchTab("open"));
-    els.tabDone.addEventListener("click", () => switchTab("done"));
+    els.calPrev.addEventListener("click", () => {
+      calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1);
+      renderCalendar();
+    });
+    els.calNext.addEventListener("click", () => {
+      calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1);
+      renderCalendar();
+    });
+    els.calToday.addEventListener("click", () => {
+      calMonth = startOfMonth(new Date());
+      calSelected = todayISO();
+      renderCalendar();
+    });
 
     els.bell.addEventListener("click", requestNotifications);
-    els.theme.addEventListener("click", toggleTheme);
-
-    // Snooze chips in the edit dialog set the date field relative to today.
-    document.querySelectorAll(".chip[data-snooze]").forEach((c) =>
-      c.addEventListener("click", () => {
-        const d = new Date();
-        const v = c.dataset.snooze;
-        d.setDate(d.getDate() + (v === "tomorrow" ? 1 : parseInt(v, 10)));
-        els.editDate.value = toISODate(d);
-      }),
-    );
+    els.settingsBtn.addEventListener("click", openSettings);
+    els.setTheme.addEventListener("change", () => {
+      settings.theme = els.setTheme.value;
+      saveSettings();
+      applyTheme();
+    });
+    els.setLead.addEventListener("change", () => {
+      settings.defaultLead = parseInt(els.setLead.value, 10) || 0;
+      saveSettings();
+    });
+    els.setWeekStart.addEventListener("change", () => {
+      settings.weekStart = parseInt(els.setWeekStart.value, 10) || 0;
+      saveSettings();
+    });
+    els.clearAllBtn.addEventListener("click", () => {
+      if (confirm("ล้างข้อมูลงานทั้งหมด? (กู้คืนไม่ได้)")) {
+        tasks = [];
+        save();
+        els.settingsDialog.close();
+        render();
+        showToast("ล้างข้อมูลทั้งหมดแล้ว");
+      }
+    });
 
     els.exportBtn.addEventListener("click", exportData);
     els.importBtn.addEventListener("click", () => els.importFile.click());
@@ -742,6 +938,26 @@
       e.target.value = "";
     });
 
+    // Edit dialog
+    els.subAddBtn.addEventListener("click", addSubtask);
+    els.subInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addSubtask();
+      }
+    });
+    document.querySelectorAll(".chip[data-snooze]").forEach((c) =>
+      c.addEventListener("click", () => {
+        const v = c.dataset.snooze;
+        if (v === "clear") {
+          els.editDate.value = "";
+          return;
+        }
+        const d = new Date();
+        d.setDate(d.getDate() + (v === "tomorrow" ? 1 : parseInt(v, 10)));
+        els.editDate.value = toISODate(d);
+      }),
+    );
     els.cancelBtn.addEventListener("click", () => els.dialog.close());
     els.deleteBtn.addEventListener("click", () => {
       const id = editingId;
@@ -750,31 +966,19 @@
     });
     els.editForm.addEventListener("submit", () => saveEdit());
 
-    applyTheme();
     updateBellUI();
     render();
     checkDue();
     setInterval(checkDue, CHECK_INTERVAL_MS);
-    // Re-check when the app regains focus (covers overnight / tab-switch).
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         render();
         checkDue();
       }
     });
-
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").then(() => scheduleTriggers()).catch(() => {});
     }
-  }
-
-  function switchTab(tab) {
-    currentTab = tab;
-    els.tabOpen.classList.toggle("tab--active", tab === "open");
-    els.tabDone.classList.toggle("tab--active", tab === "done");
-    els.tabOpen.setAttribute("aria-selected", tab === "open");
-    els.tabDone.setAttribute("aria-selected", tab === "done");
-    render();
   }
 
   document.addEventListener("DOMContentLoaded", init);

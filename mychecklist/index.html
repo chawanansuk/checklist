@@ -19,32 +19,24 @@
     <script>
       // Apply saved theme before first paint to avoid a flash.
       try {
-        var t = localStorage.getItem("mychecklist.theme");
-        if (t) document.documentElement.dataset.theme = t;
+        var s = JSON.parse(localStorage.getItem("mychecklist.settings.v1") || "{}");
+        if (s.theme && s.theme !== "auto") document.documentElement.dataset.theme = s.theme;
       } catch (e) {}
     </script>
   </head>
   <body>
     <div class="app">
-      <!-- Header status bar -->
+      <!-- Header -->
       <header class="header">
         <div class="header__top">
-          <div>
+          <div class="header__left">
             <div class="header__today" id="todayLabel">—</div>
             <div class="header__summary" id="summaryLabel">กำลังโหลด…</div>
+            <div class="header__stats" id="statsLabel"></div>
           </div>
           <div class="header__actions">
-            <button class="icon-btn" id="themeBtn" title="สลับโหมดมืด/สว่าง" aria-label="สลับธีม">
-              🌙
-            </button>
-            <button
-              class="icon-btn"
-              id="bellBtn"
-              title="เปิดการแจ้งเตือนของระบบ"
-              aria-label="เปิดการแจ้งเตือน"
-            >
-              🔔
-            </button>
+            <button class="icon-btn" id="settingsBtn" title="ตั้งค่า" aria-label="ตั้งค่า">⚙️</button>
+            <button class="icon-btn" id="bellBtn" title="เปิดการแจ้งเตือน" aria-label="เปิดการแจ้งเตือน">🔔</button>
           </div>
         </div>
 
@@ -62,6 +54,7 @@
             <button type="button" class="chip" data-quick="today">วันนี้</button>
             <button type="button" class="chip" data-quick="tomorrow">พรุ่งนี้</button>
             <button type="button" class="chip" data-quick="week">+7 วัน</button>
+            <button type="button" class="chip" data-quick="none">ไม่มีกำหนด</button>
           </div>
           <div class="quickadd__grid">
             <label class="mini">
@@ -91,34 +84,55 @@
         </form>
       </header>
 
-      <!-- Tabs -->
-      <nav class="tabs" role="tablist">
-        <button class="tab tab--active" id="tabOpen" role="tab" aria-selected="true">
-          ค้างอยู่ <span class="tab__count" id="openCount">0</span>
-        </button>
-        <button class="tab" id="tabDone" role="tab" aria-selected="false">
-          เสร็จแล้ว <span class="tab__count" id="doneCount" data-zero="true">0</span>
-        </button>
-      </nav>
-
-      <!-- Search -->
-      <div class="searchbar">
-        <input
-          type="search"
-          id="searchInput"
-          class="searchbar__input"
-          placeholder="🔍 ค้นหางาน / แท็ก / โน้ต…"
-          aria-label="ค้นหา"
-        />
+      <!-- View switch -->
+      <div class="viewswitch" role="tablist">
+        <button class="viewswitch__btn viewswitch__btn--active" id="viewList" role="tab">📋 รายการ</button>
+        <button class="viewswitch__btn" id="viewCal" role="tab">📅 ปฏิทิน</button>
       </div>
 
-      <!-- Tag filter -->
-      <div class="tagfilter" id="tagFilter" hidden></div>
+      <!-- ===== LIST VIEW ===== -->
+      <section id="listView">
+        <nav class="tabs" role="tablist">
+          <button class="tab tab--active" id="tabOpen" role="tab" aria-selected="true">
+            ค้างอยู่ <span class="tab__count" id="openCount">0</span>
+          </button>
+          <button class="tab" id="tabDone" role="tab" aria-selected="false">
+            เสร็จแล้ว <span class="tab__count" id="doneCount" data-zero="true">0</span>
+          </button>
+          <div class="tabs__spacer"></div>
+          <select class="sortselect" id="sortSelect" aria-label="จัดเรียง">
+            <option value="date">เรียงตามวัน</option>
+            <option value="important">สำคัญก่อน</option>
+            <option value="created">เพิ่มล่าสุด</option>
+          </select>
+        </nav>
 
-      <!-- Main list -->
-      <main class="list" id="list" aria-live="polite"></main>
+        <div class="searchbar">
+          <input
+            type="search"
+            id="searchInput"
+            class="searchbar__input"
+            placeholder="🔍 ค้นหางาน / แท็ก / โน้ต…"
+            aria-label="ค้นหา"
+          />
+        </div>
+        <div class="tagfilter" id="tagFilter" hidden></div>
+        <main class="list" id="list" aria-live="polite"></main>
+      </section>
 
-      <!-- Footer actions -->
+      <!-- ===== CALENDAR VIEW ===== -->
+      <section id="calView" hidden>
+        <div class="cal__head">
+          <button class="icon-btn" id="calPrev" aria-label="เดือนก่อนหน้า">‹</button>
+          <div class="cal__title" id="calTitle">—</div>
+          <button class="icon-btn" id="calNext" aria-label="เดือนถัดไป">›</button>
+          <button class="btn btn--ghost cal__today" id="calToday">วันนี้</button>
+        </div>
+        <div class="cal__grid" id="calGrid"></div>
+        <div class="cal__day" id="calDay"></div>
+      </section>
+
+      <!-- Footer -->
       <footer class="footer">
         <button class="link-btn" id="exportBtn">⬇︎ สำรองข้อมูล</button>
         <button class="link-btn" id="importBtn">⬆︎ กู้ข้อมูล</button>
@@ -127,7 +141,6 @@
       </footer>
     </div>
 
-    <!-- In-app toast / notification -->
     <div class="toast" id="toast" role="status" hidden></div>
 
     <!-- Edit dialog -->
@@ -153,15 +166,8 @@
           <button type="button" class="chip" data-snooze="tomorrow">พรุ่งนี้</button>
           <button type="button" class="chip" data-snooze="3">+3 วัน</button>
           <button type="button" class="chip" data-snooze="7">+7 วัน</button>
+          <button type="button" class="chip" data-snooze="clear">ไม่มีกำหนด</button>
         </div>
-        <label class="check-field">
-          <input type="checkbox" id="editImportant" />
-          <span>⭐ ทำเครื่องหมายว่าสำคัญ (ปักหมุดขึ้นบนสุด)</span>
-        </label>
-        <label class="field">
-          <span>โน้ต (ไม่บังคับ)</span>
-          <textarea id="editNote" rows="2"></textarea>
-        </label>
         <div class="field-row">
           <label class="field">
             <span>ทำซ้ำ</span>
@@ -174,15 +180,82 @@
             </select>
           </label>
           <label class="field">
-            <span>แท็ก/อาคาร</span>
-            <input type="text" id="editTag" />
+            <span>เตือนล่วงหน้า</span>
+            <select id="editLead">
+              <option value="0">ตรงเวลา</option>
+              <option value="1">1 ชั่วโมง</option>
+              <option value="3">3 ชั่วโมง</option>
+              <option value="24">1 วัน</option>
+              <option value="72">3 วัน</option>
+              <option value="168">1 สัปดาห์</option>
+            </select>
           </label>
         </div>
+        <label class="field">
+          <span>แท็ก/อาคาร</span>
+          <input type="text" id="editTag" />
+        </label>
+        <label class="field">
+          <span>โน้ต</span>
+          <textarea id="editNote" rows="2"></textarea>
+        </label>
+
+        <!-- Subtasks -->
+        <div class="field">
+          <span>งานย่อย (เช็คลิสต์)</span>
+          <div class="subtasks" id="subList"></div>
+          <div class="subtasks__add">
+            <input type="text" id="subInput" placeholder="เพิ่มงานย่อย…" />
+            <button type="button" class="btn btn--ghost" id="subAddBtn">เพิ่ม</button>
+          </div>
+        </div>
+
+        <label class="check-field">
+          <input type="checkbox" id="editImportant" />
+          <span>⭐ ทำเครื่องหมายว่าสำคัญ (ปักหมุดขึ้นบนสุด)</span>
+        </label>
+
         <div class="dialog__actions">
-          <button type="button" class="btn btn--danger" id="deleteBtn">ลบงานนี้</button>
+          <button type="button" class="btn btn--danger" id="deleteBtn">ลบ</button>
           <div class="spacer"></div>
           <button type="button" class="btn btn--ghost" id="cancelBtn">ยกเลิก</button>
           <button type="submit" class="btn btn--primary">บันทึก</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Settings dialog -->
+    <dialog class="dialog" id="settingsDialog">
+      <form method="dialog" class="dialog__form">
+        <h2 class="dialog__title">ตั้งค่า</h2>
+        <label class="field">
+          <span>ธีม</span>
+          <select id="setTheme">
+            <option value="auto">ตามระบบ</option>
+            <option value="light">สว่าง</option>
+            <option value="dark">มืด</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>เตือนล่วงหน้าเริ่มต้น (สำหรับงานใหม่)</span>
+          <select id="setLead">
+            <option value="0">ตรงเวลา</option>
+            <option value="1">1 ชั่วโมง</option>
+            <option value="3">3 ชั่วโมง</option>
+            <option value="24">1 วัน</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>วันเริ่มต้นสัปดาห์ (ปฏิทิน)</span>
+          <select id="setWeekStart">
+            <option value="1">จันทร์</option>
+            <option value="0">อาทิตย์</option>
+          </select>
+        </label>
+        <div class="dialog__actions">
+          <button type="button" class="btn btn--danger" id="clearAllBtn">ล้างข้อมูลทั้งหมด</button>
+          <div class="spacer"></div>
+          <button type="submit" class="btn btn--primary">ปิด</button>
         </div>
       </form>
     </dialog>
