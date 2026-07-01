@@ -16,6 +16,13 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Apply saved theme before first paint to avoid a flash.
+      try {
+        var t = localStorage.getItem("mychecklist.theme");
+        if (t) document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div class="app">
@@ -26,14 +33,19 @@
             <div class="header__today" id="todayLabel">—</div>
             <div class="header__summary" id="summaryLabel">กำลังโหลด…</div>
           </div>
-          <button
-            class="icon-btn"
-            id="bellBtn"
-            title="เปิดการแจ้งเตือนของระบบ"
-            aria-label="เปิดการแจ้งเตือน"
-          >
-            🔔
-          </button>
+          <div class="header__actions">
+            <button class="icon-btn" id="themeBtn" title="สลับโหมดมืด/สว่าง" aria-label="สลับธีม">
+              🌙
+            </button>
+            <button
+              class="icon-btn"
+              id="bellBtn"
+              title="เปิดการแจ้งเตือนของระบบ"
+              aria-label="เปิดการแจ้งเตือน"
+            >
+              🔔
+            </button>
+          </div>
         </div>
 
         <!-- Quick add -->
@@ -46,30 +58,36 @@
             aria-label="ชื่องาน"
             required
           />
-          <div class="quickadd__row">
-            <div class="chips" role="group" aria-label="เลือกวันด่วน">
-              <button type="button" class="chip" data-quick="today">วันนี้</button>
-              <button type="button" class="chip" data-quick="tomorrow">พรุ่งนี้</button>
-              <button type="button" class="chip" data-quick="week">+7 วัน</button>
-            </div>
-            <input class="quickadd__date" id="dateInput" type="date" aria-label="วันครบกำหนด" />
-            <input class="quickadd__time" id="timeInput" type="time" aria-label="เวลา (ไม่บังคับ)" />
-            <select class="quickadd__repeat" id="repeatInput" aria-label="ทำซ้ำ">
-              <option value="none">ไม่ซ้ำ</option>
-              <option value="daily">ทุกวัน</option>
-              <option value="weekly">ทุกสัปดาห์</option>
-              <option value="monthly">ทุกเดือน</option>
-              <option value="yearly">ทุกปี</option>
-            </select>
-            <input
-              class="quickadd__tag"
-              id="tagInput"
-              type="text"
-              placeholder="แท็ก/อาคาร (ไม่บังคับ)"
-              aria-label="แท็กหรืออาคาร"
-            />
-            <button class="quickadd__submit" type="submit">เพิ่ม</button>
+          <div class="chips" role="group" aria-label="เลือกวันด่วน">
+            <button type="button" class="chip" data-quick="today">วันนี้</button>
+            <button type="button" class="chip" data-quick="tomorrow">พรุ่งนี้</button>
+            <button type="button" class="chip" data-quick="week">+7 วัน</button>
           </div>
+          <div class="quickadd__grid">
+            <label class="mini">
+              <span>วันครบกำหนด</span>
+              <input id="dateInput" type="date" />
+            </label>
+            <label class="mini">
+              <span>เวลา (ไม่บังคับ)</span>
+              <input id="timeInput" type="time" />
+            </label>
+            <label class="mini">
+              <span>ทำซ้ำ</span>
+              <select id="repeatInput">
+                <option value="none">ไม่ซ้ำ</option>
+                <option value="daily">ทุกวัน</option>
+                <option value="weekly">ทุกสัปดาห์</option>
+                <option value="monthly">ทุกเดือน</option>
+                <option value="yearly">ทุกปี</option>
+              </select>
+            </label>
+            <label class="mini">
+              <span>แท็ก/อาคาร (ไม่บังคับ)</span>
+              <input id="tagInput" type="text" placeholder="เช่น Maytree48" />
+            </label>
+          </div>
+          <button class="quickadd__submit" type="submit">+ เพิ่มงาน</button>
         </form>
       </header>
 
@@ -78,7 +96,9 @@
         <button class="tab tab--active" id="tabOpen" role="tab" aria-selected="true">
           ค้างอยู่ <span class="tab__count" id="openCount">0</span>
         </button>
-        <button class="tab" id="tabDone" role="tab" aria-selected="false">เสร็จแล้ว</button>
+        <button class="tab" id="tabDone" role="tab" aria-selected="false">
+          เสร็จแล้ว <span class="tab__count" id="doneCount" data-zero="true">0</span>
+        </button>
       </nav>
 
       <!-- Search -->
@@ -128,6 +148,16 @@
             <input type="time" id="editTime" />
           </label>
         </div>
+        <div class="snooze" role="group" aria-label="เลื่อนวัน">
+          <span class="snooze__label">เลื่อนไป:</span>
+          <button type="button" class="chip" data-snooze="tomorrow">พรุ่งนี้</button>
+          <button type="button" class="chip" data-snooze="3">+3 วัน</button>
+          <button type="button" class="chip" data-snooze="7">+7 วัน</button>
+        </div>
+        <label class="check-field">
+          <input type="checkbox" id="editImportant" />
+          <span>⭐ ทำเครื่องหมายว่าสำคัญ (ปักหมุดขึ้นบนสุด)</span>
+        </label>
         <label class="field">
           <span>โน้ต (ไม่บังคับ)</span>
           <textarea id="editNote" rows="2"></textarea>

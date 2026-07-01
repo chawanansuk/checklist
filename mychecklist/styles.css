@@ -1,15 +1,55 @@
 :root {
   --bg: #faf8f4;
   --card: #ffffff;
+  --field-bg: #ffffff;
+  --chip-bg: #f6f3ec;
   --ink: #23201b;
   --muted: #8a8579;
   --primary: #2c6e63;
   --primary-ink: #ffffff;
+  --accent-soft: #eaf3f1;
   --overdue: #b4531f;
   --overdue-bg: #fbeee4;
+  --star: #d99a1c;
   --line: #ece7dd;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.05);
   --radius: 14px;
+}
+
+/* Dark theme: applied via system preference OR the [data-theme] toggle. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17130f;
+    --card: #221d18;
+    --field-bg: #2a241e;
+    --chip-bg: #2a241e;
+    --ink: #f3ede4;
+    --muted: #a79f92;
+    --primary: #4fb3a2;
+    --primary-ink: #0e1a17;
+    --accent-soft: #1e332f;
+    --overdue: #e2743c;
+    --overdue-bg: #35251b;
+    --star: #e8b23e;
+    --line: #362f27;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17130f;
+  --card: #221d18;
+  --field-bg: #2a241e;
+  --chip-bg: #2a241e;
+  --ink: #f3ede4;
+  --muted: #a79f92;
+  --primary: #4fb3a2;
+  --primary-ink: #0e1a17;
+  --accent-soft: #1e332f;
+  --overdue: #e2743c;
+  --overdue-bg: #35251b;
+  --star: #e8b23e;
+  --line: #362f27;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -66,6 +106,10 @@ body {
   margin-top: 2px;
 }
 
+.header__actions {
+  display: flex;
+  gap: 8px;
+}
 .icon-btn {
   border: 1px solid var(--line);
   background: var(--card);
@@ -75,10 +119,11 @@ body {
   font-size: 20px;
   cursor: pointer;
   box-shadow: var(--shadow);
+  color: var(--ink);
 }
 .icon-btn.is-on {
   border-color: var(--primary);
-  background: #eaf3f1;
+  background: var(--accent-soft);
 }
 
 /* ---------- Quick add ---------- */
@@ -102,22 +147,43 @@ body {
   color: var(--ink);
 }
 
-.quickadd__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
+.quickadd__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
   margin-top: 10px;
+}
+.mini {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mini > span {
+  font-size: 12px;
+  color: var(--muted);
+  padding-left: 2px;
+}
+.mini input,
+.mini select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--field-bg);
+  color: var(--ink);
+  width: 100%;
 }
 
 .chips {
   display: flex;
   gap: 6px;
+  margin-top: 10px;
 }
 
 .chip {
   border: 1px solid var(--line);
-  background: #f6f3ec;
+  background: var(--chip-bg);
   border-radius: 999px;
   padding: 6px 12px;
   font-size: 13px;
@@ -129,34 +195,18 @@ body {
   border-color: var(--primary);
 }
 
-.quickadd__date,
-.quickadd__time,
-.quickadd__repeat,
-.quickadd__tag {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 14px;
-  font-family: inherit;
-  background: #fff;
-  color: var(--ink);
-}
-.quickadd__tag {
-  flex: 1 1 140px;
-  min-width: 120px;
-}
-
 .quickadd__submit {
   border: none;
   background: var(--primary);
   color: var(--primary-ink);
   border-radius: 10px;
-  padding: 9px 18px;
+  padding: 11px 18px;
   font-size: 15px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  margin-left: auto;
+  width: 100%;
+  margin-top: 12px;
 }
 .quickadd__submit:hover {
   filter: brightness(1.05);
@@ -318,7 +368,7 @@ body {
   font-size: 12px;
   padding: 1px 8px;
   border-radius: 999px;
-  background: #f0ece3;
+  background: var(--chip-bg);
   color: var(--muted);
 }
 .task__badge--overdue {
@@ -339,6 +389,29 @@ body {
   color: var(--muted);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.task__star {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  padding: 2px;
+  color: var(--muted);
+  align-self: center;
+}
+.task__star.is-on {
+  color: var(--star);
+}
+.task--important {
+  border-left: 3px solid var(--star);
+}
+
+.task__badge--repeat {
+  background: var(--accent-soft);
+  color: var(--primary);
 }
 
 /* ---------- Empty state ---------- */
@@ -415,6 +488,8 @@ body {
   padding: 0;
   width: min(460px, calc(100% - 32px));
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  background: var(--card);
+  color: var(--ink);
 }
 .dialog::backdrop {
   background: rgba(20, 18, 15, 0.4);
@@ -445,9 +520,53 @@ body {
   padding: 10px;
   font-size: 15px;
   font-family: inherit;
-  background: #fff;
+  background: var(--field-bg);
   color: var(--ink);
   resize: vertical;
+}
+
+/* Snooze chips inside the edit dialog */
+.snooze {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+}
+.snooze__label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Important checkbox row */
+.check-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.check-field input {
+  width: 18px;
+  height: 18px;
+}
+
+/* Clear-completed button (done tab) */
+.cleardone {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.cleardone button {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--overdue);
+  border-radius: 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
 }
 .field-row {
   display: flex;
@@ -473,7 +592,7 @@ body {
   font-family: inherit;
   font-weight: 600;
   cursor: pointer;
-  background: #fff;
+  background: var(--card);
   color: var(--ink);
 }
 .btn--primary {
@@ -482,7 +601,7 @@ body {
   border-color: var(--primary);
 }
 .btn--ghost {
-  background: #fff;
+  background: var(--card);
 }
 .btn--danger {
   color: var(--overdue);

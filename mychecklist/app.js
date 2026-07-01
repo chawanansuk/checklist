@@ -5,7 +5,27 @@
   "use strict";
 
   const STORAGE_KEY = "mychecklist.tasks.v1";
+  const THEME_KEY = "mychecklist.theme";
   const CHECK_INTERVAL_MS = 30_000;
+
+  // ---------- Theme (light / dark / follow-system) ----------
+  const systemDark = () =>
+    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const storedTheme = () => localStorage.getItem(THEME_KEY); // 'light' | 'dark' | null
+  const effectiveDark = () => {
+    const t = storedTheme();
+    return t ? t === "dark" : systemDark();
+  };
+  function applyTheme() {
+    const t = storedTheme();
+    if (t) document.documentElement.dataset.theme = t;
+    else document.documentElement.removeAttribute("data-theme");
+    if (els.theme) els.theme.textContent = effectiveDark() ? "☀️" : "🌙";
+  }
+  function toggleTheme() {
+    localStorage.setItem(THEME_KEY, effectiveDark() ? "light" : "dark");
+    applyTheme();
+  }
 
   // ---------- Thai date helpers ----------
   const TH_DAYS = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
@@ -101,6 +121,7 @@
     today: $("todayLabel"),
     summary: $("summaryLabel"),
     bell: $("bellBtn"),
+    theme: $("themeBtn"),
     form: $("quickAddForm"),
     title: $("titleInput"),
     date: $("dateInput"),
@@ -111,6 +132,7 @@
     tabOpen: $("tabOpen"),
     tabDone: $("tabDone"),
     openCount: $("openCount"),
+    doneCount: $("doneCount"),
     tagFilter: $("tagFilter"),
     list: $("list"),
     toast: $("toast"),
@@ -125,6 +147,7 @@
     editRepeat: $("editRepeat"),
     editTag: $("editTag"),
     editNote: $("editNote"),
+    editImportant: $("editImportant"),
     deleteBtn: $("deleteBtn"),
     cancelBtn: $("cancelBtn"),
   };
@@ -164,6 +187,9 @@
     const dueToday = open.filter((x) => x.date === today).length;
     els.openCount.textContent = String(open.length);
     els.openCount.dataset.zero = open.length === 0 ? "true" : "false";
+    const doneN = tasks.filter((x) => x.done).length;
+    els.doneCount.textContent = String(doneN);
+    els.doneCount.dataset.zero = doneN === 0 ? "true" : "false";
 
     let msg;
     if (open.length === 0) msg = "ว่างหมด ไม่มีอะไรค้าง 🎉";
@@ -205,7 +231,11 @@
     const overdue = !task.done && dayDiff(task.date, today) > 0;
 
     const el = document.createElement("div");
-    el.className = "task" + (task.done ? " task--done" : "") + (overdue ? " task--overdue" : "");
+    el.className =
+      "task" +
+      (task.done ? " task--done" : "") +
+      (overdue ? " task--overdue" : "") +
+      (task.important && !task.done ? " task--important" : "");
     el.onclick = (e) => {
       if (e.target.closest(".task__check")) return;
       openEdit(task.id);
@@ -269,7 +299,17 @@
       note.textContent = task.note;
       body.append(note);
     }
-    el.append(check, body);
+    const star = document.createElement("button");
+    star.className = "task__star" + (task.important ? " is-on" : "");
+    star.textContent = task.important ? "★" : "☆";
+    star.title = task.important ? "เอาออกจากงานสำคัญ" : "ทำเครื่องหมายว่าสำคัญ";
+    star.setAttribute("aria-label", star.title);
+    star.onclick = (e) => {
+      e.stopPropagation();
+      toggleImportant(task.id);
+    };
+
+    el.append(check, body, star);
     return el;
   }
 
@@ -287,7 +327,10 @@
     els.list.innerHTML = "";
     const today = todayISO();
     const list = openTasks().sort(
-      (a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || ""),
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        (b.important ? 1 : 0) - (a.important ? 1 : 0) ||
+        (a.time || "").localeCompare(b.time || ""),
     );
 
     if (list.length === 0) {
@@ -332,6 +375,15 @@
       els.list.appendChild(emptyState("✅", "ยังไม่มีงานที่เสร็จ", "ติ๊กวงกลมหน้างานเพื่อทำเครื่องหมายเสร็จ"));
       return;
     }
+
+    const bar = document.createElement("div");
+    bar.className = "cleardone";
+    const clearBtn = document.createElement("button");
+    clearBtn.textContent = `🧹 ล้างงานที่เสร็จ (${list.length})`;
+    clearBtn.onclick = clearCompleted;
+    bar.appendChild(clearBtn);
+    els.list.appendChild(bar);
+
     list.forEach((t) => els.list.appendChild(taskEl(t)));
   }
 
@@ -352,6 +404,7 @@
       repeat: data.repeat || "none",
       tag: data.tag || "",
       note: "",
+      important: false,
       done: false,
       doneAt: null,
       notifiedAt: null,
@@ -368,6 +421,7 @@
     if (!t.done) {
       t.done = true;
       t.doneAt = new Date().toISOString();
+      if (navigator.vibrate) navigator.vibrate(15);
       // Spawn next occurrence for repeating tasks.
       if (t.repeat && t.repeat !== "none") {
         const nd = nextDate(t.date, t.repeat);
@@ -379,6 +433,8 @@
             time: t.time,
             repeat: t.repeat,
             tag: t.tag,
+            note: t.note || "",
+            important: t.important || false,
             done: false,
             doneAt: null,
             notifiedAt: null,
@@ -410,6 +466,27 @@
     }
   }
 
+  function toggleImportant(id) {
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    t.important = !t.important;
+    save();
+    render();
+  }
+
+  function clearCompleted() {
+    const removed = tasks.filter((x) => x.done);
+    if (removed.length === 0) return;
+    tasks = tasks.filter((x) => !x.done);
+    save();
+    render();
+    showToast(`ล้างแล้ว ${removed.length} งาน`, "เลิกทำ", () => {
+      tasks = tasks.concat(removed);
+      save();
+      render();
+    });
+  }
+
   function openEdit(id) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
@@ -420,6 +497,7 @@
     els.editRepeat.value = t.repeat || "none";
     els.editTag.value = t.tag || "";
     els.editNote.value = t.note || "";
+    els.editImportant.checked = Boolean(t.important);
     els.dialog.showModal();
   }
 
@@ -432,6 +510,7 @@
     t.repeat = els.editRepeat.value;
     t.tag = els.editTag.value.trim();
     t.note = els.editNote.value.trim();
+    t.important = els.editImportant.checked;
     t.notifiedAt = null; // re-arm notification after edits
     save();
     render();
@@ -644,6 +723,17 @@
     els.tabDone.addEventListener("click", () => switchTab("done"));
 
     els.bell.addEventListener("click", requestNotifications);
+    els.theme.addEventListener("click", toggleTheme);
+
+    // Snooze chips in the edit dialog set the date field relative to today.
+    document.querySelectorAll(".chip[data-snooze]").forEach((c) =>
+      c.addEventListener("click", () => {
+        const d = new Date();
+        const v = c.dataset.snooze;
+        d.setDate(d.getDate() + (v === "tomorrow" ? 1 : parseInt(v, 10)));
+        els.editDate.value = toISODate(d);
+      }),
+    );
 
     els.exportBtn.addEventListener("click", exportData);
     els.importBtn.addEventListener("click", () => els.importFile.click());
@@ -660,6 +750,7 @@
     });
     els.editForm.addEventListener("submit", () => saveEdit());
 
+    applyTheme();
     updateBellUI();
     render();
     checkDue();
