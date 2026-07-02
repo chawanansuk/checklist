@@ -26,7 +26,7 @@
   </head>
   <body>
     <div class="app">
-      <!-- Header -->
+      <!-- Slim sticky header -->
       <header class="header">
         <div class="header__top">
           <div class="header__left">
@@ -35,88 +35,32 @@
             <div class="header__stats" id="statsLabel"></div>
           </div>
           <div class="header__actions">
+            <div class="ring" id="todayRing" hidden aria-label="ความคืบหน้าวันนี้"></div>
             <button class="icon-btn" id="settingsBtn" title="ตั้งค่า" aria-label="ตั้งค่า">⚙️</button>
             <button class="icon-btn" id="bellBtn" title="เปิดการแจ้งเตือน" aria-label="เปิดการแจ้งเตือน">🔔</button>
           </div>
         </div>
-
-        <!-- Quick add -->
-        <form class="quickadd" id="quickAddForm" autocomplete="off">
-          <input
-            class="quickadd__title"
-            id="titleInput"
-            type="text"
-            placeholder="พิมพ์งานที่ต้องทำ แล้วกด Enter…"
-            aria-label="ชื่องาน"
-            required
-          />
-          <div class="chips" role="group" aria-label="เลือกวันด่วน">
-            <button type="button" class="chip" data-quick="today">วันนี้</button>
-            <button type="button" class="chip" data-quick="tomorrow">พรุ่งนี้</button>
-            <button type="button" class="chip" data-quick="week">+7 วัน</button>
-            <button type="button" class="chip" data-quick="none">ไม่มีกำหนด</button>
-          </div>
-          <div class="quickadd__grid">
-            <label class="mini">
-              <span>วันครบกำหนด</span>
-              <input id="dateInput" type="date" />
-            </label>
-            <label class="mini">
-              <span>เวลา (ไม่บังคับ)</span>
-              <input id="timeInput" type="time" />
-            </label>
-            <label class="mini">
-              <span>ทำซ้ำ</span>
-              <select id="repeatInput">
-                <option value="none">ไม่ซ้ำ</option>
-                <option value="daily">ทุกวัน</option>
-                <option value="weekly">ทุกสัปดาห์</option>
-                <option value="monthly">ทุกเดือน</option>
-                <option value="yearly">ทุกปี</option>
-              </select>
-            </label>
-            <label class="mini">
-              <span>แท็ก/อาคาร (ไม่บังคับ)</span>
-              <input id="tagInput" type="text" placeholder="เช่น Maytree48" />
-            </label>
-          </div>
-          <button class="quickadd__submit" type="submit">+ เพิ่มงาน</button>
-        </form>
       </header>
 
-      <!-- View switch -->
-      <div class="viewswitch" role="tablist">
-        <button class="viewswitch__btn viewswitch__btn--active" id="viewList" role="tab">📋 รายการ</button>
-        <button class="viewswitch__btn" id="viewCal" role="tab">📅 ปฏิทิน</button>
+      <!-- Compact toolbar: search + sort in one row -->
+      <div class="toolbar" id="toolbar">
+        <input
+          type="search"
+          id="searchInput"
+          class="toolbar__search"
+          placeholder="🔍 ค้นหางาน / แท็ก / โน้ต…"
+          aria-label="ค้นหา"
+        />
+        <select class="sortselect" id="sortSelect" aria-label="จัดเรียง">
+          <option value="date">เรียงตามวัน</option>
+          <option value="important">สำคัญก่อน</option>
+          <option value="created">เพิ่มล่าสุด</option>
+        </select>
       </div>
+      <div class="tagfilter" id="tagFilter" hidden></div>
 
-      <!-- ===== LIST VIEW ===== -->
+      <!-- ===== LIST / DONE VIEW ===== -->
       <section id="listView">
-        <nav class="tabs" role="tablist">
-          <button class="tab tab--active" id="tabOpen" role="tab" aria-selected="true">
-            ค้างอยู่ <span class="tab__count" id="openCount">0</span>
-          </button>
-          <button class="tab" id="tabDone" role="tab" aria-selected="false">
-            เสร็จแล้ว <span class="tab__count" id="doneCount" data-zero="true">0</span>
-          </button>
-          <div class="tabs__spacer"></div>
-          <select class="sortselect" id="sortSelect" aria-label="จัดเรียง">
-            <option value="date">เรียงตามวัน</option>
-            <option value="important">สำคัญก่อน</option>
-            <option value="created">เพิ่มล่าสุด</option>
-          </select>
-        </nav>
-
-        <div class="searchbar">
-          <input
-            type="search"
-            id="searchInput"
-            class="searchbar__input"
-            placeholder="🔍 ค้นหางาน / แท็ก / โน้ต…"
-            aria-label="ค้นหา"
-          />
-        </div>
-        <div class="tagfilter" id="tagFilter" hidden></div>
         <main class="list" id="list" aria-live="polite"></main>
       </section>
 
@@ -131,18 +75,78 @@
         <div class="cal__grid" id="calGrid"></div>
         <div class="cal__day" id="calDay"></div>
       </section>
-
-      <!-- Footer -->
-      <footer class="footer">
-        <button class="link-btn" id="exportBtn">⬇︎ สำรองข้อมูล</button>
-        <button class="link-btn" id="importBtn">⬆︎ กู้ข้อมูล</button>
-        <button class="link-btn" id="icsBtn">📆 ส่งออกปฏิทิน</button>
-        <input type="file" id="importFile" accept="application/json" hidden />
-        <span class="footer__note">ข้อมูลเก็บในเครื่องนี้เท่านั้น</span>
-      </footer>
     </div>
 
+    <!-- Floating add button -->
+    <button class="fab" id="fabAdd" aria-label="เพิ่มงานใหม่">＋</button>
+
+    <!-- Bottom navigation -->
+    <nav class="bottomnav" role="tablist">
+      <button class="bottomnav__btn bottomnav__btn--active" id="navList" role="tab" aria-selected="true">
+        <span class="bottomnav__ico">📋</span>
+        <span>รายการ <span class="tab__count" id="openCount">0</span></span>
+      </button>
+      <button class="bottomnav__btn" id="navCal" role="tab" aria-selected="false">
+        <span class="bottomnav__ico">📅</span>
+        <span>ปฏิทิน</span>
+      </button>
+      <button class="bottomnav__btn" id="navDone" role="tab" aria-selected="false">
+        <span class="bottomnav__ico">✅</span>
+        <span>เสร็จแล้ว <span class="tab__count" id="doneCount" data-zero="true">0</span></span>
+      </button>
+    </nav>
+
     <div class="toast" id="toast" role="status" hidden></div>
+
+    <!-- Quick-add bottom sheet -->
+    <dialog class="sheet" id="addSheet">
+      <form class="sheet__form" id="quickAddForm" autocomplete="off">
+        <div class="sheet__head">
+          <span class="sheet__title">เพิ่มงานใหม่</span>
+          <span class="sheet__msg" id="sheetMsg"></span>
+          <button type="button" class="sheet__close" id="sheetClose" aria-label="ปิด">✕</button>
+        </div>
+        <input
+          class="quickadd__title"
+          id="titleInput"
+          type="text"
+          placeholder="พิมพ์งานที่ต้องทำ แล้วกด Enter…"
+          aria-label="ชื่องาน"
+          required
+        />
+        <div class="chips" role="group" aria-label="เลือกวันด่วน">
+          <button type="button" class="chip" data-quick="today">วันนี้</button>
+          <button type="button" class="chip" data-quick="tomorrow">พรุ่งนี้</button>
+          <button type="button" class="chip" data-quick="week">+7 วัน</button>
+          <button type="button" class="chip" data-quick="none">ไม่มีกำหนด</button>
+        </div>
+        <div class="quickadd__grid">
+          <label class="mini">
+            <span>วันครบกำหนด</span>
+            <input id="dateInput" type="date" />
+          </label>
+          <label class="mini">
+            <span>เวลา (ไม่บังคับ)</span>
+            <input id="timeInput" type="time" />
+          </label>
+          <label class="mini">
+            <span>ทำซ้ำ</span>
+            <select id="repeatInput">
+              <option value="none">ไม่ซ้ำ</option>
+              <option value="daily">ทุกวัน</option>
+              <option value="weekly">ทุกสัปดาห์</option>
+              <option value="monthly">ทุกเดือน</option>
+              <option value="yearly">ทุกปี</option>
+            </select>
+          </label>
+          <label class="mini">
+            <span>แท็ก/อาคาร (ไม่บังคับ)</span>
+            <input id="tagInput" type="text" placeholder="เช่น Maytree48" />
+          </label>
+        </div>
+        <button class="quickadd__submit" type="submit">+ เพิ่มงาน</button>
+      </form>
+    </dialog>
 
     <!-- Edit dialog -->
     <dialog class="dialog" id="editDialog">
@@ -201,7 +205,6 @@
           <textarea id="editNote" rows="2"></textarea>
         </label>
 
-        <!-- Subtasks -->
         <div class="field">
           <span>งานย่อย (เช็คลิสต์)</span>
           <div class="subtasks" id="subList"></div>
@@ -253,6 +256,18 @@
             <option value="0">อาทิตย์</option>
           </select>
         </label>
+
+        <div class="field">
+          <span>ข้อมูล</span>
+          <div class="datarow">
+            <button type="button" class="btn" id="exportBtn">⬇︎ สำรอง</button>
+            <button type="button" class="btn" id="importBtn">⬆︎ กู้ข้อมูล</button>
+            <button type="button" class="btn" id="icsBtn">📆 .ics</button>
+          </div>
+          <p class="hint">ข้อมูลเก็บในเครื่องนี้เท่านั้น — ควรสำรองเป็นระยะ</p>
+        </div>
+        <input type="file" id="importFile" accept="application/json" hidden />
+
         <div class="dialog__actions">
           <button type="button" class="btn btn--danger" id="clearAllBtn">ล้างข้อมูลทั้งหมด</button>
           <div class="spacer"></div>

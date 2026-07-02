@@ -47,8 +47,9 @@
   // ---------- State ----------
   let tasks = load();
   let settings = loadSettings();
-  let currentTab = "open";
-  let currentView = "list"; // 'list' | 'calendar'
+  let currentView = "list"; // 'list' | 'calendar' | 'done'
+  const REDUCED_MOTION =
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let activeTag = null;
   let searchQuery = "";
   let editingId = null;
@@ -134,12 +135,13 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     today: $("todayLabel"), summary: $("summaryLabel"), stats: $("statsLabel"),
-    settingsBtn: $("settingsBtn"), bell: $("bellBtn"),
+    settingsBtn: $("settingsBtn"), bell: $("bellBtn"), ring: $("todayRing"),
     form: $("quickAddForm"), title: $("titleInput"), date: $("dateInput"),
     time: $("timeInput"), repeat: $("repeatInput"), tag: $("tagInput"),
-    viewList: $("viewList"), viewCal: $("viewCal"),
+    fab: $("fabAdd"), addSheet: $("addSheet"), sheetClose: $("sheetClose"),
+    sheetMsg: $("sheetMsg"), toolbar: $("toolbar"),
+    navList: $("navList"), navCal: $("navCal"), navDone: $("navDone"),
     listView: $("listView"), calView: $("calView"),
-    tabOpen: $("tabOpen"), tabDone: $("tabDone"),
     openCount: $("openCount"), doneCount: $("doneCount"),
     sortSelect: $("sortSelect"), search: $("searchInput"),
     tagFilter: $("tagFilter"), list: $("list"),
@@ -162,15 +164,18 @@
     els.today.textContent = fmtFullToday(new Date());
     renderSummary();
     renderStats();
-    if (currentView === "list") {
-      els.listView.hidden = false;
-      els.calView.hidden = true;
-      renderTagFilter();
-      currentTab === "open" ? renderOpen() : renderDone();
-    } else {
-      els.listView.hidden = true;
-      els.calView.hidden = false;
+    const isCal = currentView === "calendar";
+    els.listView.hidden = isCal;
+    els.calView.hidden = !isCal;
+    els.toolbar.hidden = isCal;
+    els.fab.hidden = currentView === "done";
+    if (isCal) {
+      els.tagFilter.hidden = true;
       renderCalendar();
+    } else {
+      renderTagFilter();
+      if (currentView === "list") renderOpen();
+      else renderDone();
     }
   }
 
@@ -197,6 +202,30 @@
       msg = parts.join(" · ");
     }
     els.summary.textContent = msg;
+    renderRing(dueToday);
+  }
+
+  /** Small progress ring in the header: today's completed / due-today total. */
+  function renderRing(dueTodayOpen) {
+    const today = todayISO();
+    const doneToday = tasks.filter(
+      (x) => x.done && x.doneAt && toISODate(new Date(x.doneAt)) === today,
+    ).length;
+    const total = doneToday + dueTodayOpen;
+    if (!total) {
+      els.ring.hidden = true;
+      return;
+    }
+    const R = 19;
+    const C = 2 * Math.PI * R;
+    const pct = doneToday / total;
+    els.ring.hidden = false;
+    els.ring.innerHTML =
+      `<svg viewBox="0 0 46 46" width="46" height="46">` +
+      `<circle cx="23" cy="23" r="${R}" fill="none" stroke="var(--line)" stroke-width="4"/>` +
+      `<circle cx="23" cy="23" r="${R}" fill="none" stroke="var(--primary)" stroke-width="4" ` +
+      `stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/>` +
+      `</svg><span class="ring__label">${doneToday}/${total}</span>`;
   }
 
   function renderStats() {
@@ -274,10 +303,10 @@
   const repeatLabel = (r) =>
     ({ daily: "ทุกวัน", weekly: "ทุกสัปดาห์", monthly: "ทุกเดือน", yearly: "ทุกปี" }[r] || "");
 
-  function groupHeader(label, overdue = false) {
+  function groupHeader(label, overdue = false, count = null) {
     const h = document.createElement("div");
     h.className = "group__label" + (overdue ? " group__label--overdue" : "");
-    h.textContent = label;
+    h.textContent = count != null ? `${label} · ${count}` : label;
     return h;
   }
 
@@ -301,7 +330,13 @@
     check.setAttribute("aria-label", task.done ? "ยกเลิกเสร็จ" : "ทำเสร็จ");
     check.onclick = (e) => {
       e.stopPropagation();
-      toggleDone(task.id);
+      // Brief strike/fade animation before the list re-renders.
+      if (!task.done && !REDUCED_MOTION && !el.classList.contains("task--completing")) {
+        el.classList.add("task--completing");
+        setTimeout(() => toggleDone(task.id), 260);
+      } else {
+        toggleDone(task.id);
+      }
     };
 
     const body = document.createElement("div");
@@ -384,7 +419,13 @@
     if (activeTag) list = list.filter((x) => (x.tag || "") === activeTag);
 
     if (list.length === 0) {
-      els.list.appendChild(emptyState("📝", "ยังไม่มีงานค้าง", "พิมพ์งานด้านบนแล้วกด Enter เพื่อเริ่มเลย"));
+      const empty = emptyState("📝", "ยังไม่มีงานค้าง", "กดปุ่ม ＋ ด้านล่างเพื่อเพิ่มงานแรก");
+      const cta = document.createElement("button");
+      cta.className = "empty__cta";
+      cta.textContent = "＋ เพิ่มงานแรก";
+      cta.onclick = () => openSheet();
+      empty.appendChild(cta);
+      els.list.appendChild(empty);
       return;
     }
     const cmp = comparator();
@@ -394,11 +435,11 @@
     const inbox = list.filter((x) => !x.date).sort(cmp);
 
     if (overdue.length) {
-      els.list.appendChild(groupHeader("เลยกำหนด", true));
+      els.list.appendChild(groupHeader("เลยกำหนด", true, overdue.length));
       overdue.forEach((t) => els.list.appendChild(taskEl(t)));
     }
     if (todayList.length) {
-      els.list.appendChild(groupHeader("วันนี้"));
+      els.list.appendChild(groupHeader("วันนี้", false, todayList.length));
       todayList.forEach((t) => els.list.appendChild(taskEl(t)));
     }
     if (upcoming.length) {
@@ -412,12 +453,12 @@
           els.list.appendChild(taskEl(t));
         });
       } else {
-        els.list.appendChild(groupHeader("ถัดไป"));
+        els.list.appendChild(groupHeader("ถัดไป", false, upcoming.length));
         upcoming.forEach((t) => els.list.appendChild(taskEl(t)));
       }
     }
     if (inbox.length) {
-      els.list.appendChild(groupHeader("📥 ไม่มีกำหนด"));
+      els.list.appendChild(groupHeader("📥 ไม่มีกำหนด", false, inbox.length));
       inbox.forEach((t) => els.list.appendChild(taskEl(t)));
     }
   }
@@ -509,12 +550,7 @@
     const addBtn = document.createElement("button");
     addBtn.className = "btn btn--ghost";
     addBtn.textContent = "+ เพิ่มในวันนี้";
-    addBtn.onclick = () => {
-      els.date.value = calSelected;
-      switchView("list");
-      els.title.focus();
-      els.title.scrollIntoView({ behavior: "smooth", block: "center" });
-    };
+    addBtn.onclick = () => openSheet(calSelected);
     head.appendChild(addBtn);
     els.calDay.appendChild(head);
 
@@ -985,20 +1021,23 @@
     els.settingsDialog.showModal();
   }
 
-  // ---------- View switch ----------
+  // ---------- View switch (bottom nav) ----------
   function switchView(v) {
     currentView = v;
-    els.viewList.classList.toggle("viewswitch__btn--active", v === "list");
-    els.viewCal.classList.toggle("viewswitch__btn--active", v === "calendar");
+    const navs = { list: els.navList, calendar: els.navCal, done: els.navDone };
+    Object.entries(navs).forEach(([key, btn]) => {
+      btn.classList.toggle("bottomnav__btn--active", key === v);
+      btn.setAttribute("aria-selected", key === v);
+    });
     render();
   }
-  function switchTab(tab) {
-    currentTab = tab;
-    els.tabOpen.classList.toggle("tab--active", tab === "open");
-    els.tabDone.classList.toggle("tab--active", tab === "done");
-    els.tabOpen.setAttribute("aria-selected", tab === "open");
-    els.tabDone.setAttribute("aria-selected", tab === "done");
-    render();
+
+  // ---------- Quick-add bottom sheet ----------
+  function openSheet(dateISO) {
+    els.date.value = dateISO != null ? dateISO : todayISO();
+    els.sheetMsg.textContent = "";
+    els.addSheet.showModal();
+    els.title.focus();
   }
 
   function setQuick(kind) {
@@ -1023,21 +1062,25 @@
       const title = els.title.value.trim();
       if (!title) return;
       addTask({ title, date: els.date.value, time: els.time.value, repeat: els.repeat.value, tag: els.tag.value.trim() });
+      // Sheet stays open for rapid entry; date/tag keep their values.
       els.title.value = "";
       els.time.value = "";
-      els.tag.value = "";
       els.repeat.value = "none";
-      els.date.value = todayISO();
       els.title.focus();
+      els.sheetMsg.textContent = "✓ เพิ่มแล้ว";
+      setTimeout(() => (els.sheetMsg.textContent = ""), 1400);
     });
     document.querySelectorAll(".chip[data-quick]").forEach((c) =>
       c.addEventListener("click", () => setQuick(c.dataset.quick)),
     );
 
-    els.viewList.addEventListener("click", () => switchView("list"));
-    els.viewCal.addEventListener("click", () => switchView("calendar"));
-    els.tabOpen.addEventListener("click", () => switchTab("open"));
-    els.tabDone.addEventListener("click", () => switchTab("done"));
+    els.fab.addEventListener("click", () =>
+      openSheet(currentView === "calendar" ? calSelected : undefined),
+    );
+    els.sheetClose.addEventListener("click", () => els.addSheet.close());
+    els.navList.addEventListener("click", () => switchView("list"));
+    els.navCal.addEventListener("click", () => switchView("calendar"));
+    els.navDone.addEventListener("click", () => switchView("done"));
     els.sortSelect.addEventListener("change", () => {
       settings.sort = els.sortSelect.value;
       saveSettings();

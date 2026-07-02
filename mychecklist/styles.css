@@ -855,3 +855,229 @@ body {
   background: var(--overdue-bg);
   border-color: var(--overdue);
 }
+
+/* ============================================================
+   UI v3 — slim header, bottom nav, FAB, quick-add sheet, polish
+   ============================================================ */
+
+.app {
+  padding-bottom: 150px; /* room for bottom nav + FAB */
+}
+
+.header {
+  padding: 14px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.header__actions {
+  align-items: center;
+}
+
+/* Progress ring (today's completion) */
+.ring {
+  position: relative;
+  width: 46px;
+  height: 46px;
+}
+.ring svg {
+  transform: rotate(-90deg);
+  display: block;
+}
+.ring__label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* Toolbar: search + sort in one row */
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+.toolbar__search {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  background: var(--card);
+  color: var(--ink);
+  min-width: 0;
+}
+
+/* Bottom navigation */
+.bottomnav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  background: var(--card);
+  border-top: 1px solid var(--line);
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
+}
+.bottomnav__btn {
+  flex: 1;
+  max-width: 200px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 2px;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.bottomnav__btn--active {
+  color: var(--primary);
+  font-weight: 700;
+  background: var(--accent-soft);
+}
+.bottomnav__ico {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* Floating add button */
+.fab {
+  position: fixed;
+  right: max(18px, calc((100vw - 640px) / 2 + 18px));
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: var(--primary-ink);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  z-index: 41;
+}
+.fab:active {
+  transform: scale(0.94);
+}
+
+/* Quick-add bottom sheet */
+.sheet {
+  border: none;
+  padding: 0;
+  width: 100%;
+  max-width: 640px;
+  margin: auto auto 0;
+  border-radius: 20px 20px 0 0;
+  background: var(--card);
+  color: var(--ink);
+  max-height: 85vh;
+  overflow: auto;
+}
+.sheet::backdrop {
+  background: rgba(15, 13, 10, 0.45);
+}
+.sheet__form {
+  padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+}
+.sheet__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.sheet__title {
+  font-family: "Bai Jamjuree", sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+}
+.sheet__msg {
+  flex: 1;
+  font-size: 13px;
+  color: var(--primary);
+  font-weight: 600;
+}
+.sheet__close {
+  border: none;
+  background: var(--chip-bg);
+  color: var(--muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sheet[open] {
+    animation: sheet-up 0.22s ease-out;
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(40px);
+      opacity: 0.6;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
+/* Complete animation */
+.task--completing {
+  opacity: 0;
+  transform: translateX(18px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 0.26s ease, transform 0.26s ease;
+}
+.task--completing .task__title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.task--completing .task__check {
+  background: var(--primary);
+}
+.task--completing .task__check::after {
+  opacity: 1;
+}
+
+/* Empty-state CTA */
+.empty__cta {
+  margin-top: 14px;
+  background: var(--primary);
+  color: var(--primary-ink);
+  border: none;
+  border-radius: 12px;
+  padding: 11px 18px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Settings: data section */
+.datarow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0 0;
+}
+
+/* Toast sits above the bottom nav */
+.toast {
+  bottom: calc(92px + env(safe-area-inset-bottom));
+}
