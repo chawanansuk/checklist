@@ -1,6 +1,9 @@
-/* MyChecklist service worker — offline app shell + notification clicks. */
+/* MyChecklist service worker — v2.
+ * Shell assets (HTML/JS/CSS/manifest) are served NETWORK-FIRST so new
+ * deploys reach users immediately; the cache is the offline fallback.
+ * Icons/fonts stay cache-first. Bumping CACHE also purges v1 caches. */
 
-const CACHE = "mychecklist-v1";
+const CACHE = "mychecklist-v2";
 const SHELL = [
   "./",
   "./index.html",
@@ -11,6 +14,9 @@ const SHELL = [
   "./icons/icon-512.png",
   "./icons/icon-maskable.png",
 ];
+
+// Same-origin destinations that must always be fresh when online.
+const NETWORK_FIRST = ["document", "script", "style", "manifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -27,25 +33,51 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Cache-first for the app shell; network-first fallback for everything else
-// (e.g. Google Fonts), caching successful GETs so fonts work offline too.
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request)
+  let sameOrigin = false;
+  try {
+    sameOrigin = new URL(request.url).origin === self.location.origin;
+  } catch {
+    /* opaque URL — treat as cross-origin */
+  }
+  const netFirst =
+    request.mode === "navigate" || (sameOrigin && NETWORK_FIRST.includes(request.destination));
+
+  if (netFirst) {
+    event.respondWith(
+      fetch(request)
         .then((res) => {
-          if (res && res.status === 200 && (res.type === "basic" || res.type === "cors")) {
+          if (res && res.status === 200) {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
           }
           return res;
         })
-        .catch(() => cached);
-    }),
+        .catch(() =>
+          caches
+            .match(request, { ignoreSearch: true })
+            .then((m) => m || caches.match("./index.html")),
+        ),
+    );
+    return;
+  }
+
+  // Everything else (icons, fonts): cache-first with background fill.
+  event.respondWith(
+    caches.match(request).then(
+      (cached) =>
+        cached ||
+        fetch(request).then((res) => {
+          if (res && res.status === 200 && (res.type === "basic" || res.type === "cors")) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+          }
+          return res;
+        }),
+    ),
   );
 });
 

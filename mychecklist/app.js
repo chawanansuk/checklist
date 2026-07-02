@@ -94,6 +94,8 @@
       defaultLead: typeof s.defaultLead === "number" ? s.defaultLead : 0,
       weekStart: s.weekStart === 0 ? 0 : 1,
       sort: s.sort || "date",
+      lastBackupAt: typeof s.lastBackupAt === "number" ? s.lastBackupAt : 0,
+      lastBackupPromptAt: typeof s.lastBackupPromptAt === "number" ? s.lastBackupPromptAt : 0,
     };
   }
   function saveSettings() {
@@ -360,6 +362,7 @@
     };
 
     el.append(check, body, star);
+    if (!task.done) attachSwipe(el, task);
     return el;
   }
   function badge(text, kind) {
@@ -600,6 +603,82 @@
     render();
   }
 
+  function snoozeTask(id, days) {
+    const t = tasks.find((x) => x.id === id);
+    if (!t || t.done) return;
+    const prev = t.date;
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    t.date = toISODate(d);
+    t.notifiedAt = null;
+    save();
+    render();
+    scheduleTriggers();
+    showToast(days === 1 ? "เลื่อนไปพรุ่งนี้แล้ว" : `เลื่อนไปอีก ${days} วันแล้ว`, "เลิกทำ", () => {
+      t.date = prev;
+      save();
+      render();
+    });
+  }
+
+  /* Touch swipe on open tasks: right = done, left = snooze to tomorrow.
+   * Vertical scrolling stays intact — we only take over once the gesture
+   * is clearly horizontal. */
+  function attachSwipe(el, task) {
+    let startX = 0;
+    let startY = 0;
+    let dx = 0;
+    let active = false;
+    let horizontal = false;
+    const reset = () => {
+      el.style.transform = "";
+      el.classList.remove("task--swipe-right", "task--swipe-left");
+    };
+    el.addEventListener(
+      "touchstart",
+      (e) => {
+        const t0 = e.touches[0];
+        startX = t0.clientX;
+        startY = t0.clientY;
+        dx = 0;
+        active = true;
+        horizontal = false;
+        el.style.transition = "none";
+      },
+      { passive: true },
+    );
+    el.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!active) return;
+        const t0 = e.touches[0];
+        dx = t0.clientX - startX;
+        const dy = t0.clientY - startY;
+        if (!horizontal) {
+          if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5) horizontal = true;
+          else if (Math.abs(dy) > 12) {
+            active = false;
+            reset();
+            return;
+          } else return;
+        }
+        el.style.transform = `translateX(${dx}px)`;
+        el.classList.toggle("task--swipe-right", dx > 40);
+        el.classList.toggle("task--swipe-left", dx < -40);
+      },
+      { passive: true },
+    );
+    el.addEventListener("touchend", () => {
+      if (!active) return;
+      active = false;
+      el.style.transition = "";
+      reset();
+      const THRESHOLD = 80;
+      if (horizontal && dx > THRESHOLD) toggleDone(task.id);
+      else if (horizontal && dx < -THRESHOLD) snoozeTask(task.id, 1);
+    });
+  }
+
   function clearCompleted() {
     const removed = tasks.filter((x) => x.done);
     if (!removed.length) return;
@@ -791,14 +870,91 @@
   }
 
   // ---------- Backup ----------
-  function exportData() {
-    const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: "application/json" });
+  const DAY_MS = 86_400_000;
+
+  function download(content, filename, type) {
+    const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `mychecklist-backup-${todayISO()}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportData() {
+    download(
+      JSON.stringify(tasks, null, 2),
+      `mychecklist-backup-${todayISO()}.json`,
+      "application/json",
+    );
+    settings.lastBackupAt = Date.now();
+    saveSettings();
+  }
+
+  /** Nudge (at most every 3 days) when there is real data and no backup for 7+ days. */
+  function maybePromptBackup() {
+    if (tasks.length < 5) return;
+    const now = Date.now();
+    if (now - settings.lastBackupAt < 7 * DAY_MS) return;
+    if (now - settings.lastBackupPromptAt < 3 * DAY_MS) return;
+    settings.lastBackupPromptAt = now;
+    saveSettings();
+    showToast("เกิน 7 วันแล้วที่ยังไม่ได้สำรองข้อมูล", "สำรองเลย", exportData);
+  }
+
+  // ---------- Calendar export (.ics) ----------
+  function icsEscape(s) {
+    return String(s)
+      .replace(/\\/g, "\\\\")
+      .replace(/;/g, "\\;")
+      .replace(/,/g, "\\,")
+      .replace(/\r?\n/g, "\\n");
+  }
+
+  /** Open, dated tasks as VEVENTs (floating local time; repeats become RRULE). */
+  function buildICS() {
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const RR = { daily: "DAILY", weekly: "WEEKLY", monthly: "MONTHLY", yearly: "YEARLY" };
+    const lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//MyChecklist//TH",
+      "CALSCALE:GREGORIAN",
+      "X-WR-CALNAME:MyChecklist",
+    ];
+    tasks
+      .filter((t) => !t.done && t.date)
+      .forEach((t) => {
+        const d = t.date.replace(/-/g, "");
+        lines.push("BEGIN:VEVENT");
+        lines.push(`UID:${t.id}@mychecklist`);
+        lines.push(`DTSTAMP:${stamp}`);
+        if (t.time) lines.push(`DTSTART:${d}T${t.time.replace(":", "")}00`);
+        else lines.push(`DTSTART;VALUE=DATE:${d}`);
+        lines.push(`SUMMARY:${icsEscape(t.title + (t.tag ? ` [${t.tag}]` : ""))}`);
+        if (t.note) lines.push(`DESCRIPTION:${icsEscape(t.note)}`);
+        if (RR[t.repeat]) lines.push(`RRULE:FREQ=${RR[t.repeat]}`);
+        if (t.leadHours) {
+          lines.push(
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            `DESCRIPTION:${icsEscape(t.title)}`,
+            `TRIGGER:-PT${t.leadHours}H`,
+            "END:VALARM",
+          );
+        }
+        lines.push("END:VEVENT");
+      });
+    lines.push("END:VCALENDAR");
+    return lines.join("\r\n");
+  }
+
+  function exportICS() {
+    const n = tasks.filter((t) => !t.done && t.date).length;
+    if (!n) return showToast("ไม่มีงานค้างที่มีวันกำหนดให้ส่งออก");
+    download(buildICS(), "mychecklist.ics", "text/calendar");
+    showToast(`ส่งออก ${n} งาน — นำไป import ใน Google Calendar ได้เลย`);
   }
   function importData(file) {
     const reader = new FileReader();
@@ -932,6 +1088,7 @@
     });
 
     els.exportBtn.addEventListener("click", exportData);
+    $("icsBtn").addEventListener("click", exportICS);
     els.importBtn.addEventListener("click", () => els.importFile.click());
     els.importFile.addEventListener("change", (e) => {
       if (e.target.files[0]) importData(e.target.files[0]);
@@ -978,7 +1135,21 @@
     });
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").then(() => scheduleTriggers()).catch(() => {});
+      // Offer a refresh when a new version of the app takes over.
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      let promptedUpdate = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!hadController || promptedUpdate) return;
+        promptedUpdate = true;
+        showToast("มีเวอร์ชันใหม่", "รีเฟรช", () => location.reload());
+      });
     }
+
+    // Ask the browser to protect our localStorage from eviction.
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
+    maybePromptBackup();
   }
 
   document.addEventListener("DOMContentLoaded", init);

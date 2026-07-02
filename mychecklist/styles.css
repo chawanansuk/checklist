@@ -842,3 +842,16 @@ body {
   background: var(--chip-bg);
   color: var(--muted);
 }
+
+/* ---------- Swipe gestures ---------- */
+.task {
+  touch-action: pan-y;
+}
+.task--swipe-right {
+  background: var(--accent-soft);
+  border-color: var(--primary);
+}
+.task--swipe-left {
+  background: var(--overdue-bg);
+  border-color: var(--overdue);
+}
