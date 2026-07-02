@@ -157,6 +157,8 @@
     deleteBtn: $("deleteBtn"), cancelBtn: $("cancelBtn"),
     settingsDialog: $("settingsDialog"), setTheme: $("setTheme"),
     setLead: $("setLead"), setWeekStart: $("setWeekStart"), clearAllBtn: $("clearAllBtn"),
+    importDialog: $("importDialog"), pasteArea: $("pasteArea"), importTag: $("importTag"),
+    importLead: $("importLead"), importBE: $("importBE"), importPreview: $("importPreview"),
   };
 
   // ---------- Rendering ----------
@@ -270,6 +272,7 @@
       const b = document.createElement("button");
       b.className = "chip" + (activeTag === tag ? " is-active" : "");
       b.textContent = label;
+      if (tag && activeTag !== tag) styleTag(b, tag);
       b.onclick = () => {
         activeTag = activeTag === tag ? null : tag;
         render();
@@ -359,7 +362,7 @@
     }
     if (task.time) meta.appendChild(plain("🕒 " + task.time));
     if (task.repeat && task.repeat !== "none") meta.appendChild(badge("↻ " + repeatLabel(task.repeat), "repeat"));
-    if (task.tag) meta.appendChild(badge("# " + task.tag, "tag"));
+    if (task.tag) meta.appendChild(badge("# " + task.tag, "tag", task.tag));
     body.appendChild(meta);
 
     // Subtask progress
@@ -400,10 +403,23 @@
     if (!task.done) attachSwipe(el, task);
     return el;
   }
-  function badge(text, kind) {
+  /** Deterministic, theme-safe colour for a tag (translucent bg + mid-tone text). */
+  function tagHue(tag) {
+    let h = 0;
+    for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) % 360;
+    return h;
+  }
+  function styleTag(elm, tag) {
+    const hue = tagHue(tag);
+    elm.style.background = `hsl(${hue} 60% 50% / 0.16)`;
+    elm.style.color = `hsl(${hue} 55% ${effectiveDark() ? 72 : 38}%)`;
+  }
+
+  function badge(text, kind, tag) {
     const b = document.createElement("span");
     b.className = "task__badge task__badge--" + kind;
     b.textContent = text;
+    if (kind === "tag" && tag) styleTag(b, tag);
     return b;
   }
   function plain(text) {
@@ -1013,6 +1029,137 @@
     reader.readAsText(file);
   }
 
+  // ---------- Import activities from pasted text ----------
+  const TH_MON = {
+    "ม.ค.": 1, มกราคม: 1, "ก.พ.": 2, กุมภาพันธ์: 2, "มี.ค.": 3, มีนาคม: 3,
+    "เม.ย.": 4, เมษายน: 4, "พ.ค.": 5, พฤษภาคม: 5, "มิ.ย.": 6, มิถุนายน: 6,
+    "ก.ค.": 7, กรกฎาคม: 7, "ส.ค.": 8, สิงหาคม: 8, "ก.ย.": 9, กันยายน: 9,
+    "ต.ค.": 10, ตุลาคม: 10, "พ.ย.": 11, พฤศจิกายน: 11, "ธ.ค.": 12, ธันวาคม: 12,
+  };
+  let importParsed = [];
+
+  function parseAnyDate(str, be) {
+    str = (str || "").trim();
+    let m;
+    if ((m = str.match(/(\d{4})-(\d{1,2})-(\d{1,2})/)))
+      return `${m[1]}-${p2(+m[2])}-${p2(+m[3])}`;
+    if ((m = str.match(/(\d{1,2})[/.](\d{1,2})[/.](\d{4})/))) {
+      let y = +m[3];
+      if (be && y > 2400) y -= 543;
+      return `${y}-${p2(+m[2])}-${p2(+m[1])}`;
+    }
+    if ((m = str.match(/(\d{1,2})\s*([ก-๙.]+)\s*(\d{4})/))) {
+      const mon = TH_MON[m[2]];
+      if (!mon) return null;
+      let y = +m[3];
+      if (be && y > 2400) y -= 543;
+      return `${y}-${p2(mon)}-${p2(+m[1])}`;
+    }
+    return null;
+  }
+
+  function parseImport(text, be) {
+    const items = [];
+    text.split(/\r?\n/).forEach((raw) => {
+      const line = raw.trim();
+      if (!line || line.startsWith("วันที่")) return;
+      let cols;
+      if (line.includes("\t")) cols = line.split("\t");
+      else if (line.includes("|")) cols = line.split(/\s*\|\s*/);
+      else cols = line.split(/\s{2,}/);
+      cols = cols.map((c) => c.trim());
+
+      let date = parseAnyDate(cols[0], be);
+      let title = "";
+      let detail = "";
+      let cat = "";
+      if (date) {
+        title = cols[1] || "";
+        detail = cols[2] || "";
+        cat = cols[3] || "";
+      } else {
+        const dm = line.match(/\d{1,2}\s*[ก-๙.]+\s*\d{4}|\d{4}-\d{1,2}-\d{1,2}/);
+        if (dm) {
+          date = parseAnyDate(dm[0], be);
+          title = line.replace(dm[0], "").replace(/[|\t]+/g, " ").trim();
+        }
+      }
+      if (!date || !title) return;
+      const important = /สอบ|ส่งงาน|test|quiz|exam/i.test(`${cat} ${title} ${detail}`);
+      items.push({
+        sel: true,
+        date,
+        title,
+        note: (cat ? `[${cat}] ` : "") + detail,
+        important,
+      });
+    });
+    return items;
+  }
+
+  function renderImportPreview() {
+    const box = els.importPreview;
+    box.innerHTML = "";
+    if (!importParsed.length) {
+      box.innerHTML = `<p class="hint">ไม่พบรายการที่อ่านได้ — ตรวจว่ามีคอลัมน์วันที่ + หัวข้อ</p>`;
+      return;
+    }
+    importParsed.forEach((it, i) => {
+      const row = document.createElement("label");
+      row.className = "import-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = it.sel;
+      cb.onchange = () => (importParsed[i].sel = cb.checked);
+      const txt = document.createElement("div");
+      txt.className = "import-row__txt";
+      txt.innerHTML =
+        `<b>${escapeHTML(it.title)}</b>${it.important ? " ⭐" : ""}` +
+        `<span class="import-row__date">${relLabel(it.date)}${it.note ? " · " + escapeHTML(it.note) : ""}</span>`;
+      row.append(cb, txt);
+      box.appendChild(row);
+    });
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "btn btn--primary import-go";
+    const n = importParsed.filter((x) => x.sel).length;
+    go.textContent = `นำเข้า ${n} งาน`;
+    go.onclick = doImport;
+    box.appendChild(go);
+  }
+  const escapeHTML = (s) =>
+    s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function doImport() {
+    const tag = els.importTag.value.trim();
+    const lead = parseInt(els.importLead.value, 10) || 0;
+    const chosen = importParsed.filter((x) => x.sel);
+    if (!chosen.length) return;
+    chosen.forEach((it, i) => {
+      tasks.push({
+        id: `imp-${it.date.replace(/-/g, "")}-${i}-${uid()}`,
+        title: it.title,
+        date: it.date,
+        time: "",
+        repeat: "none",
+        leadHours: it.important ? lead : 0,
+        tag,
+        note: it.note,
+        subtasks: [],
+        important: it.important,
+        done: false,
+        doneAt: null,
+        notifiedAt: null,
+        createdAt: new Date().toISOString(),
+      });
+    });
+    save();
+    render();
+    scheduleTriggers();
+    els.importDialog.close();
+    showToast(`นำเข้า ${chosen.length} งานแล้ว`);
+  }
+
   // ---------- Settings ----------
   function openSettings() {
     els.setTheme.value = settings.theme;
@@ -1133,6 +1280,19 @@
     els.exportBtn.addEventListener("click", exportData);
     $("icsBtn").addEventListener("click", exportICS);
     els.importBtn.addEventListener("click", () => els.importFile.click());
+
+    // Import-from-paste dialog
+    $("pasteImportBtn").addEventListener("click", () => {
+      els.settingsDialog.close();
+      importParsed = [];
+      els.importPreview.innerHTML = "";
+      els.importDialog.showModal();
+    });
+    $("importPreviewBtn").addEventListener("click", () => {
+      importParsed = parseImport(els.pasteArea.value, els.importBE.checked);
+      renderImportPreview();
+    });
+    $("importCancelBtn").addEventListener("click", () => els.importDialog.close());
     els.importFile.addEventListener("change", (e) => {
       if (e.target.files[0]) importData(e.target.files[0]);
       e.target.value = "";

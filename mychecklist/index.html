@@ -263,6 +263,7 @@
             <button type="button" class="btn" id="exportBtn">⬇︎ สำรอง</button>
             <button type="button" class="btn" id="importBtn">⬆︎ กู้ข้อมูล</button>
             <button type="button" class="btn" id="icsBtn">📆 .ics</button>
+            <button type="button" class="btn" id="pasteImportBtn">📋 นำเข้ากิจกรรม</button>
           </div>
           <p class="hint">ข้อมูลเก็บในเครื่องนี้เท่านั้น — ควรสำรองเป็นระยะ</p>
         </div>
@@ -273,6 +274,43 @@
           <div class="spacer"></div>
           <button type="submit" class="btn btn--primary">ปิด</button>
         </div>
+      </form>
+    </dialog>
+
+    <!-- Import-from-paste dialog -->
+    <dialog class="dialog" id="importDialog">
+      <form method="dialog" class="dialog__form" id="importForm">
+        <h2 class="dialog__title">นำเข้ากิจกรรม</h2>
+        <p class="hint">
+          วางตารางจาก Excel/LINE (คั่นด้วย Tab หรือ “|”) — คอลัมน์: วันที่, หัวข้อ, รายละเอียด, ประเภท
+        </p>
+        <textarea id="pasteArea" rows="5" class="paste"
+          placeholder="27 มิ.ย. 2569&#9;ชุดลูกเสือ&#9;อย่าลืมหมวก&#9;กิจกรรม"></textarea>
+        <div class="field-row">
+          <label class="field">
+            <span>ใส่แท็กให้ทุกงาน</span>
+            <input type="text" id="importTag" value="ลูก" />
+          </label>
+          <label class="field">
+            <span>เตือนล่วงหน้า (งานสอบ/ส่งงาน)</span>
+            <select id="importLead">
+              <option value="24">1 วัน</option>
+              <option value="0">ตรงเวลา</option>
+              <option value="72">3 วัน</option>
+              <option value="168">1 สัปดาห์</option>
+            </select>
+          </label>
+        </div>
+        <label class="check-field">
+          <input type="checkbox" id="importBE" checked />
+          <span>ปีเป็น พ.ศ. (แปลงเป็น ค.ศ. อัตโนมัติ)</span>
+        </label>
+        <div class="dialog__actions">
+          <button type="button" class="btn btn--ghost" id="importPreviewBtn">ดูตัวอย่าง</button>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn--ghost" id="importCancelBtn">ปิด</button>
+        </div>
+        <div class="import-preview" id="importPreview"></div>
       </form>
     </dialog>
 
