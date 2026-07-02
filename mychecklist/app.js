@@ -73,6 +73,7 @@
       subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
       leadHours: typeof t.leadHours === "number" ? t.leadHours : 0,
       important: Boolean(t.important),
+      order: typeof t.order === "number" ? t.order : 0,
       note: t.note || "",
       tag: t.tag || "",
       date: t.date == null ? "" : t.date,
@@ -92,9 +93,16 @@
     }
     return {
       theme: s.theme || "auto",
+      accent: s.accent || "green",
+      fontSize: s.fontSize || "normal",
+      density: s.density || "comfortable",
       defaultLead: typeof s.defaultLead === "number" ? s.defaultLead : 0,
       weekStart: s.weekStart === 0 ? 0 : 1,
       sort: s.sort || "date",
+      quietOn: Boolean(s.quietOn),
+      quietFrom: s.quietFrom || "21:00",
+      quietTo: s.quietTo || "07:00",
+      reminderRepeat: s.reminderRepeat === "once" ? "once" : "daily",
       lastBackupAt: typeof s.lastBackupAt === "number" ? s.lastBackupAt : 0,
       lastBackupPromptAt: typeof s.lastBackupPromptAt === "number" ? s.lastBackupPromptAt : 0,
     };
@@ -113,8 +121,16 @@
   const effectiveDark = () =>
     settings.theme === "dark" || (settings.theme === "auto" && systemDark());
   function applyTheme() {
-    if (settings.theme === "auto") document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.dataset.theme = settings.theme;
+    const r = document.documentElement;
+    if (settings.theme === "auto") r.removeAttribute("data-theme");
+    else r.dataset.theme = settings.theme;
+    setAttr(r, "data-accent", settings.accent, "green");
+    setAttr(r, "data-font", settings.fontSize, "normal");
+    setAttr(r, "data-density", settings.density, "comfortable");
+  }
+  function setAttr(el, name, val, dflt) {
+    if (val === dflt) el.removeAttribute(name);
+    else el.setAttribute(name, val);
   }
 
   // ---------- Recurrence ----------
@@ -157,6 +173,9 @@
     deleteBtn: $("deleteBtn"), cancelBtn: $("cancelBtn"),
     settingsDialog: $("settingsDialog"), setTheme: $("setTheme"),
     setLead: $("setLead"), setWeekStart: $("setWeekStart"), clearAllBtn: $("clearAllBtn"),
+    setAccent: $("setAccent"), setFont: $("setFont"), setDensity: $("setDensity"),
+    setQuietOn: $("setQuietOn"), setQuietFrom: $("setQuietFrom"), setQuietTo: $("setQuietTo"),
+    setReminderRepeat: $("setReminderRepeat"),
     importDialog: $("importDialog"), pasteArea: $("pasteArea"), importTag: $("importTag"),
     importLead: $("importLead"), importBE: $("importBE"), importPreview: $("importPreview"),
   };
@@ -205,6 +224,16 @@
     }
     els.summary.textContent = msg;
     renderRing(dueToday);
+
+    // App-icon badge (installed PWA on supporting platforms).
+    try {
+      if (navigator.setAppBadge) {
+        if (open.length) navigator.setAppBadge(open.length);
+        else navigator.clearAppBadge && navigator.clearAppBadge();
+      }
+    } catch {
+      /* unsupported */
+    }
   }
 
   /** Small progress ring in the header: today's completed / due-today total. */
@@ -298,9 +327,11 @@
     const imp = (a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0);
     const dt = (a, b) => (a.date || "9999-99-99").localeCompare(b.date || "9999-99-99");
     const tm = (a, b) => (a.time || "").localeCompare(b.time || "");
-    if (settings.sort === "important") return (a, b) => imp(a, b) || dt(a, b) || tm(a, b);
+    const ord = (a, b) => (a.order || 0) - (b.order || 0);
+    if (settings.sort === "important") return (a, b) => imp(a, b) || dt(a, b) || ord(a, b) || tm(a, b);
     if (settings.sort === "created") return (a, b) => (b.createdAt || "").localeCompare(a.createdAt || "");
-    return (a, b) => dt(a, b) || imp(a, b) || tm(a, b);
+    // date: manual order (from drag) takes precedence within a day, then importance.
+    return (a, b) => dt(a, b) || ord(a, b) || imp(a, b) || tm(a, b);
   }
 
   const repeatLabel = (r) =>
@@ -313,9 +344,32 @@
     return h;
   }
 
+  // Known activity categories -> a hue for their coloured badge.
+  const CAT_HUE = {
+    สอบ: 4, ส่งงาน: 28, เตรียม: 210, กิจกรรม: 145,
+    การเรียน: 190, วันหยุด: 285, หมายเหตุ: 45, "แต่งกาย": 320,
+  };
+  function catBadge(cat) {
+    const b = document.createElement("span");
+    b.className = "task__badge";
+    b.textContent = cat;
+    const hue = CAT_HUE[cat] != null ? CAT_HUE[cat] : tagHue(cat);
+    b.style.background = `hsl(${hue} 65% 50% / 0.18)`;
+    b.style.color = `hsl(${hue} 60% ${effectiveDark() ? 74 : 36}%)`;
+    return b;
+  }
+
   function taskEl(task) {
     const today = todayISO();
     const overdue = !task.done && task.date && dayDiff(task.date, today) > 0;
+    // Split a leading "[category]" out of the note into its own badge.
+    let noteBody = task.note || "";
+    let cat = null;
+    const cm = noteBody.match(/^\s*\[([^\]]+)\]\s*/);
+    if (cm) {
+      cat = cm[1].split("/")[0].trim();
+      noteBody = noteBody.slice(cm[0].length);
+    }
 
     const el = document.createElement("div");
     el.className =
@@ -360,6 +414,7 @@
     } else if (task.doneAt) {
       meta.appendChild(plain("เสร็จเมื่อ " + relLabel(toISODate(new Date(task.doneAt)))));
     }
+    if (cat) meta.appendChild(catBadge(cat));
     if (task.time) meta.appendChild(plain("🕒 " + task.time));
     if (task.repeat && task.repeat !== "none") meta.appendChild(badge("↻ " + repeatLabel(task.repeat), "repeat"));
     if (task.tag) meta.appendChild(badge("# " + task.tag, "tag", task.tag));
@@ -383,10 +438,10 @@
       body.appendChild(prog);
     }
 
-    if (task.note) {
+    if (noteBody.trim()) {
       const note = document.createElement("div");
       note.className = "task__note";
-      note.textContent = task.note;
+      note.textContent = noteBody.trim();
       body.appendChild(note);
     }
 
@@ -400,8 +455,69 @@
     };
 
     el.append(check, body, star);
+    el.dataset.id = task.id;
+
+    // Drag handle to reorder within the list view (open tasks only).
+    if (currentView === "list" && !task.done) {
+      const grip = document.createElement("button");
+      grip.className = "task__grip";
+      grip.textContent = "⠿";
+      grip.setAttribute("aria-label", "ลากจัดลำดับ");
+      grip.title = "ลากเพื่อจัดลำดับ";
+      el.appendChild(grip);
+      attachReorder(grip, task);
+    }
+
     if (!task.done) attachSwipe(el, task);
     return el;
+  }
+
+  function attachReorder(grip, task) {
+    grip.style.touchAction = "none";
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = grip.closest(".task");
+      const listEl = els.list;
+      card.classList.add("task--dragging");
+      let moved = false;
+
+      const move = (ev) => {
+        moved = true;
+        const y = ev.clientY;
+        const sibs = [...listEl.querySelectorAll(".task:not(.task--dragging)")];
+        let before = null;
+        for (const s of sibs) {
+          const r = s.getBoundingClientRect();
+          if (y < r.top + r.height / 2) {
+            before = s;
+            break;
+          }
+        }
+        if (before) listEl.insertBefore(card, before);
+        else if (sibs.length) listEl.insertBefore(card, sibs[sibs.length - 1].nextSibling);
+      };
+      const up = () => {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        card.classList.remove("task--dragging");
+        if (moved) commitOrder(task.date);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
+  }
+
+  /** Renumber `order` for all open tasks sharing `date`, by their DOM order. */
+  function commitOrder(date) {
+    const ids = [...els.list.querySelectorAll(".task")].map((el) => el.dataset.id);
+    let n = 0;
+    ids.forEach((id) => {
+      const t = tasks.find((x) => x.id === id);
+      if (t && t.date === date && !t.done) t.order = n++;
+    });
+    save();
+    render();
   }
   /** Deterministic, theme-safe colour for a tag (translucent bg + mid-tone text). */
   function tagHue(tag) {
@@ -447,8 +563,22 @@
     const cmp = comparator();
     const overdue = list.filter((x) => x.date && dayDiff(x.date, today) > 0).sort(cmp);
     const todayList = list.filter((x) => x.date === today).sort(cmp);
-    const upcoming = list.filter((x) => x.date && dayDiff(x.date, today) < 0).sort(cmp);
+    let upcoming = list.filter((x) => x.date && dayDiff(x.date, today) < 0).sort(cmp);
     const inbox = list.filter((x) => !x.date).sort(cmp);
+
+    // Evening: surface tomorrow's tasks in a highlighted "prep tonight" section.
+    const tmr = toISODate(new Date(Date.now() + 86_400_000));
+    let prep = [];
+    if (new Date().getHours() >= 17) {
+      prep = upcoming.filter((x) => x.date === tmr);
+      upcoming = upcoming.filter((x) => x.date !== tmr);
+    }
+    if (prep.length) {
+      const h = groupHeader("🎒 เย็นนี้เตรียมของพรุ่งนี้", false, prep.length);
+      h.classList.add("group__label--prep");
+      els.list.appendChild(h);
+      prep.forEach((t) => els.list.appendChild(taskEl(t)));
+    }
 
     if (overdue.length) {
       els.list.appendChild(groupHeader("เลยกำหนด", true, overdue.length));
@@ -689,6 +819,7 @@
     el.addEventListener(
       "touchstart",
       (e) => {
+        if (e.target.closest(".task__grip")) return; // let the drag handle win
         const t0 = e.touches[0];
         startX = t0.clientX;
         startY = t0.clientY;
@@ -871,16 +1002,32 @@
     }
     return d.getTime();
   }
+  function toMin(hhmm) {
+    const [h, m] = (hhmm || "0:0").split(":").map(Number);
+    return h * 60 + (m || 0);
+  }
+  function inQuietHours(d) {
+    if (!settings.quietOn) return false;
+    const now = d.getHours() * 60 + d.getMinutes();
+    const from = toMin(settings.quietFrom);
+    const to = toMin(settings.quietTo);
+    return from < to ? now >= from && now < to : now >= from || now < to;
+  }
+
   function checkDue() {
     const today = todayISO();
     const now = Date.now();
+    // During quiet hours, hold notifications (they fire once the window ends).
+    if (inQuietHours(new Date())) return;
     let fired = null;
     tasks.forEach((t) => {
       if (t.done || !t.date) return;
       const due = dueDateTimeMs(t);
       if (due == null) return;
       const notifyAt = due - (t.leadHours || 0) * 3_600_000;
-      if (now >= notifyAt && t.notifiedAt !== today) {
+      const alreadyNotified =
+        settings.reminderRepeat === "once" ? Boolean(t.notifiedAt) : t.notifiedAt === today;
+      if (now >= notifyAt && !alreadyNotified) {
         t.notifiedAt = today;
         fired = t.title;
         systemNotify(t);
@@ -1161,10 +1308,22 @@
   }
 
   // ---------- Settings ----------
+  function markAccent() {
+    els.setAccent.querySelectorAll(".swatch").forEach((s) =>
+      s.classList.toggle("is-on", s.dataset.accent === settings.accent),
+    );
+  }
   function openSettings() {
     els.setTheme.value = settings.theme;
     els.setLead.value = String(settings.defaultLead);
     els.setWeekStart.value = String(settings.weekStart);
+    els.setFont.value = settings.fontSize;
+    els.setDensity.value = settings.density;
+    els.setQuietOn.checked = settings.quietOn;
+    els.setQuietFrom.value = settings.quietFrom;
+    els.setQuietTo.value = settings.quietTo;
+    els.setReminderRepeat.value = settings.reminderRepeat;
+    markAccent();
     els.settingsDialog.showModal();
   }
 
@@ -1265,6 +1424,41 @@
     });
     els.setWeekStart.addEventListener("change", () => {
       settings.weekStart = parseInt(els.setWeekStart.value, 10) || 0;
+      saveSettings();
+    });
+    els.setAccent.querySelectorAll(".swatch").forEach((s) =>
+      s.addEventListener("click", () => {
+        settings.accent = s.dataset.accent;
+        saveSettings();
+        applyTheme();
+        markAccent();
+        render();
+      }),
+    );
+    els.setFont.addEventListener("change", () => {
+      settings.fontSize = els.setFont.value;
+      saveSettings();
+      applyTheme();
+    });
+    els.setDensity.addEventListener("change", () => {
+      settings.density = els.setDensity.value;
+      saveSettings();
+      applyTheme();
+    });
+    els.setQuietOn.addEventListener("change", () => {
+      settings.quietOn = els.setQuietOn.checked;
+      saveSettings();
+    });
+    els.setQuietFrom.addEventListener("change", () => {
+      settings.quietFrom = els.setQuietFrom.value || "21:00";
+      saveSettings();
+    });
+    els.setQuietTo.addEventListener("change", () => {
+      settings.quietTo = els.setQuietTo.value || "07:00";
+      saveSettings();
+    });
+    els.setReminderRepeat.addEventListener("change", () => {
+      settings.reminderRepeat = els.setReminderRepeat.value;
       saveSettings();
     });
     els.clearAllBtn.addEventListener("click", () => {

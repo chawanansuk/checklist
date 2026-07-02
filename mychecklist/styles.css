@@ -5,9 +5,11 @@
   --chip-bg: #f6f3ec;
   --ink: #23201b;
   --muted: #8a8579;
-  --primary: #2c6e63;
+  --p-h: 172;
+  --p-s: 44%;
+  --primary: hsl(var(--p-h) var(--p-s) 30%);
   --primary-ink: #ffffff;
-  --accent-soft: #eaf3f1;
+  --accent-soft: hsl(var(--p-h) 32% 93%);
   --overdue: #b4531f;
   --overdue-bg: #fbeee4;
   --star: #d99a1c;
@@ -25,9 +27,9 @@
     --chip-bg: #2a241e;
     --ink: #f3ede4;
     --muted: #a79f92;
-    --primary: #4fb3a2;
+    --primary: hsl(var(--p-h) var(--p-s) 55%);
     --primary-ink: #0e1a17;
-    --accent-soft: #1e332f;
+    --accent-soft: hsl(var(--p-h) 26% 17%);
     --overdue: #e2743c;
     --overdue-bg: #35251b;
     --star: #e8b23e;
@@ -1128,3 +1130,87 @@ body {
   width: 100%;
   margin-top: 12px;
 }
+
+/* ============================================================
+   Set A+B+C — accent, font size, density, badges, grip, etc.
+   ============================================================ */
+
+/* Accent colour = just a hue/sat swap; --primary recomputes per theme */
+:root[data-accent="blue"]   { --p-h: 210; --p-s: 55%; }
+:root[data-accent="purple"] { --p-h: 275; --p-s: 42%; }
+:root[data-accent="orange"] { --p-h: 24;  --p-s: 62%; }
+
+/* Font size */
+:root[data-font="large"] .task__title { font-size: 18px; }
+:root[data-font="large"] .task__meta,
+:root[data-font="large"] .task__note { font-size: 15px; }
+:root[data-font="large"] .header__today { font-size: 22px; }
+:root[data-font="large"] .group__label { font-size: 15px; }
+
+/* Density: compact */
+:root[data-density="compact"] .task { padding: 8px 12px; margin-bottom: 6px; gap: 10px; }
+:root[data-density="compact"] .group__label { margin: 12px 4px 6px; }
+:root[data-density="compact"] .task__meta { margin-top: 2px; }
+
+/* Category badge base (colour applied inline) */
+.task__badge { white-space: nowrap; }
+
+/* One-line note clamp on cards (full text shows in edit) */
+.task__note {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Drag handle */
+.task__grip {
+  flex: 0 0 auto;
+  align-self: center;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: grab;
+  padding: 2px 0 2px 4px;
+  opacity: 0.5;
+  touch-action: none;
+}
+.task__grip:active { cursor: grabbing; }
+.task--dragging {
+  opacity: 0.85;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  position: relative;
+  z-index: 5;
+}
+
+/* Evening prep section */
+.group__label--prep {
+  color: var(--primary);
+  background: var(--accent-soft);
+  padding: 8px 12px;
+  border-radius: 10px;
+  margin: 8px 0 10px;
+}
+
+/* Accent swatches in settings */
+.swatches { display: flex; gap: 10px; }
+.swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--sw);
+  cursor: pointer;
+  padding: 0;
+}
+.swatch.is-on {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-color: var(--card);
+}
+
+/* Item 1: keep toast clear of the floating add button */
+.toast { bottom: calc(150px + env(safe-area-inset-bottom)); }

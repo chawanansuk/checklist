@@ -17,10 +17,14 @@
     />
     <link rel="stylesheet" href="styles.css" />
     <script>
-      // Apply saved theme before first paint to avoid a flash.
+      // Apply saved appearance before first paint to avoid a flash.
       try {
         var s = JSON.parse(localStorage.getItem("mychecklist.settings.v1") || "{}");
-        if (s.theme && s.theme !== "auto") document.documentElement.dataset.theme = s.theme;
+        var r = document.documentElement;
+        if (s.theme && s.theme !== "auto") r.dataset.theme = s.theme;
+        if (s.accent && s.accent !== "green") r.dataset.accent = s.accent;
+        if (s.fontSize && s.fontSize !== "normal") r.dataset.font = s.fontSize;
+        if (s.density && s.density !== "comfortable") r.dataset.density = s.density;
       } catch (e) {}
     </script>
   </head>
@@ -238,6 +242,55 @@
             <option value="auto">ตามระบบ</option>
             <option value="light">สว่าง</option>
             <option value="dark">มืด</option>
+          </select>
+        </label>
+        <div class="field">
+          <span>สีหลัก</span>
+          <div class="swatches" id="setAccent">
+            <button type="button" class="swatch" data-accent="green" style="--sw:#2c6e63" aria-label="เขียว"></button>
+            <button type="button" class="swatch" data-accent="blue" style="--sw:#2f6fb0" aria-label="น้ำเงิน"></button>
+            <button type="button" class="swatch" data-accent="purple" style="--sw:#7a4fb0" aria-label="ม่วง"></button>
+            <button type="button" class="swatch" data-accent="orange" style="--sw:#c96a2b" aria-label="ส้ม"></button>
+          </div>
+        </div>
+        <div class="field-row">
+          <label class="field">
+            <span>ขนาดตัวอักษร</span>
+            <select id="setFont">
+              <option value="normal">ปกติ</option>
+              <option value="large">ใหญ่</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>ความหนาแน่น</span>
+            <select id="setDensity">
+              <option value="comfortable">สบายตา</option>
+              <option value="compact">กะทัดรัด</option>
+            </select>
+          </label>
+        </div>
+        <div class="field">
+          <span>ช่วงเวลาเงียบ (พักการเตือน)</span>
+          <label class="check-field">
+            <input type="checkbox" id="setQuietOn" />
+            <span>เปิด — งานที่ถึงกำหนดช่วงนี้จะรอเตือนตอนหมดช่วง</span>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>ตั้งแต่</span>
+              <input type="time" id="setQuietFrom" value="21:00" />
+            </label>
+            <label class="field">
+              <span>ถึง</span>
+              <input type="time" id="setQuietTo" value="07:00" />
+            </label>
+          </div>
+        </div>
+        <label class="field">
+          <span>รูปแบบการเตือนซ้ำ</span>
+          <select id="setReminderRepeat">
+            <option value="daily">เตือนทุกวันจนกว่าจะทำเสร็จ</option>
+            <option value="once">เตือนครั้งเดียว</option>
           </select>
         </label>
         <label class="field">
