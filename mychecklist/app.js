@@ -7,6 +7,7 @@
 
   const STORAGE_KEY = "mychecklist.tasks.v1";
   const SETTINGS_KEY = "mychecklist.settings.v1";
+  const COLLAPSED_KEY = "mychecklist.collapsed.v1";
   const CHECK_INTERVAL_MS = 30_000;
 
   // ---------- Thai date helpers ----------
@@ -47,6 +48,7 @@
   // ---------- State ----------
   let tasks = load();
   let settings = loadSettings();
+  let collapsedGroups = loadCollapsed();
   let currentView = "list"; // 'list' | 'calendar' | 'done'
   const REDUCED_MOTION =
     window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -109,6 +111,22 @@
   }
   function saveSettings() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+  function loadCollapsed() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]"));
+    } catch {
+      return new Set();
+    }
+  }
+  function saveCollapsed() {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedGroups]));
+  }
+  function toggleGroup(key) {
+    if (collapsedGroups.has(key)) collapsedGroups.delete(key);
+    else collapsedGroups.add(key);
+    saveCollapsed();
+    render();
   }
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   function startOfMonth(d) {
@@ -337,10 +355,20 @@
   const repeatLabel = (r) =>
     ({ daily: "ทุกวัน", weekly: "ทุกสัปดาห์", monthly: "ทุกเดือน", yearly: "ทุกปี" }[r] || "");
 
-  function groupHeader(label, overdue = false, count = null) {
-    const h = document.createElement("div");
+  function groupHeader(label, overdue = false, count = null, key = null, collapsed = false) {
+    const h = document.createElement(key ? "button" : "div");
     h.className = "group__label" + (overdue ? " group__label--overdue" : "");
-    h.textContent = count != null ? `${label} · ${count}` : label;
+    if (key) {
+      h.type = "button";
+      h.classList.add("group__label--btn");
+      const caret = document.createElement("span");
+      caret.className = "group__caret";
+      caret.textContent = collapsed ? "▸" : "▾";
+      h.append(caret, document.createTextNode(` ${label}${count != null ? ` · ${count}` : ""}`));
+      h.onclick = () => toggleGroup(key);
+    } else {
+      h.textContent = count != null ? `${label} · ${count}` : label;
+    }
     return h;
   }
 
@@ -443,6 +471,23 @@
       note.className = "task__note";
       note.textContent = noteBody.trim();
       body.appendChild(note);
+    }
+
+    // Inbox cards get one-tap scheduling chips.
+    if (!task.date && !task.done && currentView === "list") {
+      const q = document.createElement("div");
+      q.className = "task__quick";
+      [["today", "วันนี้"], ["tomorrow", "พรุ่งนี้"], ["week", "+7 วัน"]].forEach(([k, lbl]) => {
+        const c = document.createElement("button");
+        c.className = "chip chip--sm";
+        c.textContent = lbl;
+        c.onclick = (e) => {
+          e.stopPropagation();
+          scheduleQuick(task.id, k);
+        };
+        q.appendChild(c);
+      });
+      body.appendChild(q);
     }
 
     const star = document.createElement("button");
@@ -573,39 +618,32 @@
       prep = upcoming.filter((x) => x.date === tmr);
       upcoming = upcoming.filter((x) => x.date !== tmr);
     }
-    if (prep.length) {
-      const h = groupHeader("🎒 เย็นนี้เตรียมของพรุ่งนี้", false, prep.length);
-      h.classList.add("group__label--prep");
+    // Collapsible group: header (with caret + count) then its tasks.
+    const group = (key, label, items, opts = {}) => {
+      if (!items.length) return;
+      const collapsed = collapsedGroups.has(key);
+      const h = groupHeader(label, opts.overdue, items.length, key, collapsed);
+      if (opts.prep) h.classList.add("group__label--prep");
       els.list.appendChild(h);
-      prep.forEach((t) => els.list.appendChild(taskEl(t)));
-    }
+      if (!collapsed) items.forEach((t) => els.list.appendChild(taskEl(t)));
+    };
 
-    if (overdue.length) {
-      els.list.appendChild(groupHeader("เลยกำหนด", true, overdue.length));
-      overdue.forEach((t) => els.list.appendChild(taskEl(t)));
-    }
-    if (todayList.length) {
-      els.list.appendChild(groupHeader("วันนี้", false, todayList.length));
-      todayList.forEach((t) => els.list.appendChild(taskEl(t)));
-    }
+    group("prep", "🎒 เย็นนี้เตรียมของพรุ่งนี้", prep, { prep: true });
+    group("overdue", "เลยกำหนด", overdue, { overdue: true });
+    group("today", "วันนี้", todayList);
+    // Inbox surfaced high — right after today, before future dates.
+    group("inbox", "📥 ไม่มีกำหนด", inbox);
     if (upcoming.length) {
       if (settings.sort === "date") {
-        let last = null;
+        const byDate = new Map();
         upcoming.forEach((t) => {
-          if (t.date !== last) {
-            els.list.appendChild(groupHeader(relLabel(t.date)));
-            last = t.date;
-          }
-          els.list.appendChild(taskEl(t));
+          if (!byDate.has(t.date)) byDate.set(t.date, []);
+          byDate.get(t.date).push(t);
         });
+        byDate.forEach((items, date) => group("d:" + date, relLabel(date), items));
       } else {
-        els.list.appendChild(groupHeader("ถัดไป", false, upcoming.length));
-        upcoming.forEach((t) => els.list.appendChild(taskEl(t)));
+        group("upcoming", "ถัดไป", upcoming);
       }
-    }
-    if (inbox.length) {
-      els.list.appendChild(groupHeader("📥 ไม่มีกำหนด", false, inbox.length));
-      inbox.forEach((t) => els.list.appendChild(taskEl(t)));
     }
   }
 
@@ -783,6 +821,26 @@
     t.important = !t.important;
     save();
     render();
+  }
+
+  /** Assign a due date to an inbox task in one tap. */
+  function scheduleQuick(id, kind) {
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    const prev = t.date;
+    const d = new Date();
+    if (kind === "tomorrow") d.setDate(d.getDate() + 1);
+    if (kind === "week") d.setDate(d.getDate() + 7);
+    t.date = toISODate(d);
+    t.notifiedAt = null;
+    save();
+    render();
+    scheduleTriggers();
+    showToast("ตั้งวันแล้ว: " + relLabel(t.date), "เลิกทำ", () => {
+      t.date = prev;
+      save();
+      render();
+    });
   }
 
   function snoozeTask(id, days) {
