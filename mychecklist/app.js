@@ -8,6 +8,8 @@
   const STORAGE_KEY = "mychecklist.tasks.v1";
   const SETTINGS_KEY = "mychecklist.settings.v1";
   const COLLAPSED_KEY = "mychecklist.collapsed.v1";
+  const TRASH_KEY = "mychecklist.trash.v1";
+  const TRASH_KEEP_DAYS = 30;
   const CHECK_INTERVAL_MS = 30_000;
 
   // ---------- Thai date helpers ----------
@@ -49,6 +51,7 @@
   let tasks = load();
   let settings = loadSettings();
   let collapsedGroups = loadCollapsed();
+  let trash = loadTrash();
   let currentView = "list"; // 'list' | 'calendar' | 'done'
   const REDUCED_MOTION =
     window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -128,6 +131,62 @@
     saveCollapsed();
     render();
   }
+
+  // ---------- Trash (recoverable deletes, kept 30 days) ----------
+  function loadTrash() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(TRASH_KEY) || "[]");
+      if (!Array.isArray(arr)) return [];
+      const cutoff = Date.now() - TRASH_KEEP_DAYS * 86_400_000;
+      return arr.filter((e) => e && e.task && e.deletedAt > cutoff);
+    } catch {
+      return [];
+    }
+  }
+  function saveTrash() {
+    localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
+  }
+  function moveToTrash(taskArr) {
+    const now = Date.now();
+    taskArr.forEach((t) => trash.unshift({ task: t, deletedAt: now }));
+    saveTrash();
+  }
+  function restoreFromTrash(index) {
+    const entry = trash.splice(index, 1)[0];
+    if (!entry) return;
+    saveTrash();
+    tasks.push(migrate(entry.task));
+    save();
+    render();
+    renderTrashList();
+    showToast("กู้คืนแล้ว: " + entry.task.title);
+  }
+
+  function renderTrashList() {
+    const box = els.trashList;
+    box.innerHTML = "";
+    if (!trash.length) {
+      box.innerHTML = `<p class="hint">ถังขยะว่าง</p>`;
+      return;
+    }
+    trash.forEach((e, i) => {
+      const row = document.createElement("div");
+      row.className = "trash-row";
+      const txt = document.createElement("div");
+      txt.className = "trash-row__txt";
+      const daysLeft = TRASH_KEEP_DAYS - Math.floor((Date.now() - e.deletedAt) / 86_400_000);
+      txt.innerHTML =
+        `<b>${escapeHTML(e.task.title)}</b>` +
+        `<span class="trash-row__sub">${e.task.tag ? "# " + escapeHTML(e.task.tag) + " · " : ""}เหลืออีก ${daysLeft} วัน</span>`;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn--ghost";
+      btn.textContent = "กู้คืน";
+      btn.onclick = () => restoreFromTrash(i);
+      row.append(txt, btn);
+      box.appendChild(row);
+    });
+  }
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   function startOfMonth(d) {
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -196,6 +255,8 @@
     setReminderRepeat: $("setReminderRepeat"),
     importDialog: $("importDialog"), pasteArea: $("pasteArea"), importTag: $("importTag"),
     importLead: $("importLead"), importBE: $("importBE"), importPreview: $("importPreview"),
+    trashBtn: $("trashBtn"), trashDialog: $("trashDialog"), trashList: $("trashList"),
+    emptyTrashBtn: $("emptyTrashBtn"),
   };
 
   // ---------- Rendering ----------
@@ -624,12 +685,30 @@
       const collapsed = collapsedGroups.has(key);
       const h = groupHeader(label, opts.overdue, items.length, key, collapsed);
       if (opts.prep) h.classList.add("group__label--prep");
-      els.list.appendChild(h);
+      if (opts.action) {
+        const row = document.createElement("div");
+        row.className = "group-row";
+        const a = document.createElement("button");
+        a.type = "button";
+        a.className = "chip chip--sm group-row__action";
+        a.textContent = opts.action.label;
+        a.onclick = opts.action.onClick;
+        row.append(h, a);
+        els.list.appendChild(row);
+      } else {
+        els.list.appendChild(h);
+      }
       if (!collapsed) items.forEach((t) => els.list.appendChild(taskEl(t)));
     };
 
     group("prep", "🎒 เย็นนี้เตรียมของพรุ่งนี้", prep, { prep: true });
-    group("overdue", "เลยกำหนด", overdue, { overdue: true });
+    group("overdue", "เลยกำหนด", overdue, {
+      overdue: true,
+      action:
+        overdue.length > 1
+          ? { label: "→ วันนี้ทั้งหมด", onClick: rescheduleOverdueToToday }
+          : null,
+    });
     group("today", "วันนี้", todayList);
     // Inbox surfaced high — right after today, before future dates.
     group("inbox", "📥 ไม่มีกำหนด", inbox);
@@ -663,7 +742,25 @@
     clearBtn.onclick = clearCompleted;
     bar.appendChild(clearBtn);
     els.list.appendChild(bar);
-    list.forEach((t) => els.list.appendChild(taskEl(t)));
+
+    // Group by when they were completed.
+    const today = todayISO();
+    const bucketOf = (t) => {
+      if (!t.doneAt) return 3;
+      const daysAgo = dayDiff(toISODate(new Date(t.doneAt)), today);
+      if (daysAgo <= 0) return 0;
+      if (daysAgo === 1) return 1;
+      if (daysAgo <= 6) return 2;
+      return 3;
+    };
+    const LABELS = ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เก่ากว่านั้น"];
+    const buckets = [[], [], [], []];
+    list.forEach((t) => buckets[bucketOf(t)].push(t));
+    buckets.forEach((items, i) => {
+      if (!items.length) return;
+      els.list.appendChild(groupHeader(LABELS[i], false, items.length));
+      items.forEach((t) => els.list.appendChild(taskEl(t)));
+    });
   }
 
   function emptyState(emoji, title, sub) {
@@ -692,11 +789,13 @@
     const daysInMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0).getDate();
     const today = todayISO();
 
-    // counts per date (open tasks)
+    // counts per date (open tasks) + which days hold an important task
     const counts = {};
+    const impDays = new Set();
     openList().forEach((t) => {
       if (!t.date) return;
       counts[t.date] = (counts[t.date] || 0) + 1;
+      if (t.important) impDays.add(t.date);
     });
 
     for (let i = 0; i < startPad; i++) {
@@ -714,7 +813,8 @@
       const isOverdue = n > 0 && dayDiff(iso, today) > 0;
       c.innerHTML =
         `<span class="cal__num">${day}</span>` +
-        (n ? `<span class="cal__dot ${isOverdue ? "cal__dot--overdue" : ""}">${n}</span>` : "");
+        (n ? `<span class="cal__dot ${isOverdue ? "cal__dot--overdue" : ""}">${n}</span>` : "") +
+        (impDays.has(iso) ? `<span class="cal__imp">★</span>` : "");
       c.onclick = () => {
         calSelected = iso;
         renderCalendar();
@@ -823,6 +923,31 @@
     render();
   }
 
+  /** Move every overdue open task to today in one tap (undoable). */
+  function rescheduleOverdueToToday() {
+    const today = todayISO();
+    const affected = tasks
+      .filter((t) => !t.done && t.date && dayDiff(t.date, today) > 0)
+      .map((t) => ({ id: t.id, prev: t.date }));
+    if (!affected.length) return;
+    affected.forEach((a) => {
+      const t = tasks.find((x) => x.id === a.id);
+      t.date = today;
+      t.notifiedAt = null;
+    });
+    save();
+    render();
+    scheduleTriggers();
+    showToast(`เลื่อน ${affected.length} งานมาวันนี้แล้ว`, "เลิกทำ", () => {
+      affected.forEach((a) => {
+        const t = tasks.find((x) => x.id === a.id);
+        if (t) t.date = a.prev;
+      });
+      save();
+      render();
+    });
+  }
+
   /** Assign a due date to an inbox task in one tap. */
   function scheduleQuick(id, kind) {
     const t = tasks.find((x) => x.id === id);
@@ -924,9 +1049,13 @@
     const removed = tasks.filter((x) => x.done);
     if (!removed.length) return;
     tasks = tasks.filter((x) => !x.done);
+    moveToTrash(removed);
     save();
     render();
-    showToast(`ล้างแล้ว ${removed.length} งาน`, "เลิกทำ", () => {
+    showToast(`ล้างแล้ว ${removed.length} งาน (อยู่ในถังขยะ)`, "เลิกทำ", () => {
+      const ids = new Set(removed.map((r) => r.id));
+      trash = trash.filter((e) => !ids.has(e.task.id));
+      saveTrash();
       tasks = tasks.concat(removed);
       save();
       render();
@@ -1008,9 +1137,15 @@
     const idx = tasks.findIndex((x) => x.id === id);
     if (idx < 0) return;
     const [removed] = tasks.splice(idx, 1);
+    moveToTrash([removed]);
     save();
     render();
-    showToast("ลบงานแล้ว", "เลิกทำ", () => {
+    showToast("ลบแล้ว (กู้คืนได้ในถังขยะ)", "เลิกทำ", () => {
+      const ti = trash.findIndex((e) => e.task.id === removed.id);
+      if (ti >= 0) {
+        trash.splice(ti, 1);
+        saveTrash();
+      }
       tasks.splice(idx, 0, removed);
       save();
       render();
@@ -1545,6 +1680,21 @@
       renderImportPreview();
     });
     $("importCancelBtn").addEventListener("click", () => els.importDialog.close());
+
+    // Trash
+    els.trashBtn.addEventListener("click", () => {
+      els.settingsDialog.close();
+      renderTrashList();
+      els.trashDialog.showModal();
+    });
+    els.emptyTrashBtn.addEventListener("click", () => {
+      if (!trash.length) return;
+      if (confirm(`ลบถาวร ${trash.length} งานในถังขยะ?`)) {
+        trash = [];
+        saveTrash();
+        renderTrashList();
+      }
+    });
     els.importFile.addEventListener("change", (e) => {
       if (e.target.files[0]) importData(e.target.files[0]);
       e.target.value = "";

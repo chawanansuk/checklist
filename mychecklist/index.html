@@ -317,6 +317,7 @@
             <button type="button" class="btn" id="importBtn">⬆︎ กู้ข้อมูล</button>
             <button type="button" class="btn" id="icsBtn">📆 .ics</button>
             <button type="button" class="btn" id="pasteImportBtn">📋 นำเข้ากิจกรรม</button>
+            <button type="button" class="btn" id="trashBtn">🗑️ ถังขยะ</button>
           </div>
           <p class="hint">ข้อมูลเก็บในเครื่องนี้เท่านั้น — ควรสำรองเป็นระยะ</p>
         </div>
@@ -364,6 +365,20 @@
           <button type="button" class="btn btn--ghost" id="importCancelBtn">ปิด</button>
         </div>
         <div class="import-preview" id="importPreview"></div>
+      </form>
+    </dialog>
+
+    <!-- Trash dialog -->
+    <dialog class="dialog" id="trashDialog">
+      <form method="dialog" class="dialog__form">
+        <h2 class="dialog__title">🗑️ ถังขยะ</h2>
+        <p class="hint">งานที่ลบจะเก็บไว้ 30 วัน แล้วลบถาวรอัตโนมัติ</p>
+        <div class="trash-list" id="trashList"></div>
+        <div class="dialog__actions">
+          <button type="button" class="btn btn--danger" id="emptyTrashBtn">ล้างถังขยะ</button>
+          <div class="spacer"></div>
+          <button type="submit" class="btn btn--primary">ปิด</button>
+        </div>
       </form>
     </dialog>
 
