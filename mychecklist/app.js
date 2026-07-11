@@ -213,15 +213,29 @@
   // ---------- Recurrence ----------
   function nextDate(iso, repeat) {
     if (!iso) return null;
-    const d = parseISO(iso);
+    const [y, m, d] = iso.split("-").map(Number); // m is 1-based
     switch (repeat) {
-      case "daily": d.setDate(d.getDate() + 1); break;
-      case "weekly": d.setDate(d.getDate() + 7); break;
-      case "monthly": d.setMonth(d.getMonth() + 1); break;
-      case "yearly": d.setFullYear(d.getFullYear() + 1); break;
-      default: return null;
+      case "daily":
+        return toISODate(new Date(y, m - 1, d + 1));
+      case "weekly":
+        return toISODate(new Date(y, m - 1, d + 7));
+      case "monthly":
+      case "yearly": {
+        // Clamp to the target month's last day so Jan 31 -> Feb 28,
+        // not Mar 3 (setMonth would overflow), and Feb 29 -> Feb 28.
+        let ny = y;
+        let nm = m + (repeat === "monthly" ? 1 : 0);
+        if (repeat === "yearly") ny += 1;
+        if (nm > 12) {
+          nm = 1;
+          ny += 1;
+        }
+        const lastDay = new Date(ny, nm, 0).getDate();
+        return `${ny}-${p2(nm)}-${p2(Math.min(d, lastDay))}`;
+      }
+      default:
+        return null;
     }
-    return toISODate(d);
   }
 
   // ---------- DOM ----------
@@ -318,7 +332,7 @@
   /** Small progress ring in the header: today's completed / due-today total. */
   function renderRing(dueTodayOpen) {
     const today = todayISO();
-    const doneToday = tasks.filter(
+    const doneToday = doneUniverse().filter(
       (x) => x.done && x.doneAt && toISODate(new Date(x.doneAt)) === today,
     ).length;
     const total = doneToday + dueTodayOpen;
@@ -338,9 +352,16 @@
       `</svg><span class="ring__label">${doneToday}/${total}</span>`;
   }
 
+  /** Tasks + trashed tasks: clearing completed must not erase stats history. */
+  function doneUniverse() {
+    return tasks.concat(trash.map((e) => e.task));
+  }
+
   function renderStats() {
     const doneDates = new Set(
-      tasks.filter((x) => x.done && x.doneAt).map((x) => toISODate(new Date(x.doneAt))),
+      doneUniverse()
+        .filter((x) => x.done && x.doneAt)
+        .map((x) => toISODate(new Date(x.doneAt))),
     );
     if (doneDates.size === 0) {
       els.stats.textContent = "";
@@ -357,7 +378,7 @@
     // Completed in the last 7 days.
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 6);
-    const weekDone = tasks.filter(
+    const weekDone = doneUniverse().filter(
       (x) => x.done && x.doneAt && new Date(x.doneAt) >= new Date(toISODate(weekAgo)),
     ).length;
 
@@ -1204,6 +1225,7 @@
     const now = d.getHours() * 60 + d.getMinutes();
     const from = toMin(settings.quietFrom);
     const to = toMin(settings.quietTo);
+    if (from === to) return false; // equal times = no window, never block
     return from < to ? now >= from && now < to : now >= from || now < to;
   }
 
@@ -1212,7 +1234,7 @@
     const now = Date.now();
     // During quiet hours, hold notifications (they fire once the window ends).
     if (inQuietHours(new Date())) return;
-    let fired = null;
+    const fired = [];
     tasks.forEach((t) => {
       if (t.done || !t.date) return;
       const due = dueDateTimeMs(t);
@@ -1222,13 +1244,17 @@
         settings.reminderRepeat === "once" ? Boolean(t.notifiedAt) : t.notifiedAt === today;
       if (now >= notifyAt && !alreadyNotified) {
         t.notifiedAt = today;
-        fired = t.title;
+        fired.push(t);
         systemNotify(t);
       }
     });
-    if (fired) {
+    if (fired.length) {
       save();
-      showToast("ถึงกำหนด: " + fired);
+      showToast(
+        fired.length === 1
+          ? "ถึงกำหนด: " + fired[0].title
+          : `ถึงกำหนด ${fired.length} งาน: ${fired[0].title} และอื่น ๆ`,
+      );
       render();
     }
   }

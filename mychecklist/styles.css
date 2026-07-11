@@ -322,14 +322,6 @@ body {
   background: var(--overdue);
   color: #fff;
 }
-.task__badge--repeat {
-  background: #eaf3f1;
-  color: var(--primary);
-}
-.task__badge--tag {
-  background: #efeaf7;
-  color: #6b4ea8;
-}
 .task__note {
   margin-top: 4px;
   font-size: 13px;
