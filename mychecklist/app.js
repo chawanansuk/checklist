@@ -132,6 +132,105 @@
     render();
   }
 
+  // ---------- Photo attachments (IndexedDB — too big for localStorage) ----------
+  let dbPromise = null;
+  const photoCounts = new Map(); // taskId -> number, kept in sync for card badges
+
+  function openDB() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open("mychecklist", 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("photos")) {
+          const st = db.createObjectStore("photos", { keyPath: "id" });
+          st.createIndex("taskId", "taskId");
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return dbPromise;
+  }
+  const tx = (db, mode) => db.transaction("photos", mode).objectStore("photos");
+  const reqP = (r) =>
+    new Promise((res, rej) => {
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+
+  async function photoAdd(taskId, blob) {
+    const db = await openDB();
+    const rec = { id: uid(), taskId, blob, createdAt: Date.now() };
+    await reqP(tx(db, "readwrite").put(rec));
+    photoCounts.set(taskId, (photoCounts.get(taskId) || 0) + 1);
+    return rec;
+  }
+  async function photosFor(taskId) {
+    const db = await openDB();
+    return reqP(tx(db, "readonly").index("taskId").getAll(taskId));
+  }
+  async function photoDelete(id, taskId) {
+    const db = await openDB();
+    await reqP(tx(db, "readwrite").delete(id));
+    photoCounts.set(taskId, Math.max(0, (photoCounts.get(taskId) || 1) - 1));
+  }
+  async function loadPhotoCounts() {
+    try {
+      const db = await openDB();
+      photoCounts.clear();
+      await new Promise((resolve) => {
+        const cur = tx(db, "readonly").index("taskId").openKeyCursor();
+        cur.onsuccess = () => {
+          const c = cur.result;
+          if (!c) return resolve();
+          photoCounts.set(c.key, (photoCounts.get(c.key) || 0) + 1);
+          c.continue();
+        };
+        cur.onerror = () => resolve();
+      });
+      render();
+    } catch {
+      /* IndexedDB unavailable — photos disabled, app still works */
+    }
+  }
+  /** Remove photos whose task no longer exists anywhere (tasks or trash). */
+  async function cleanupPhotos() {
+    try {
+      const db = await openDB();
+      const valid = new Set(tasks.map((t) => t.id).concat(trash.map((e) => e.task.id)));
+      await new Promise((resolve) => {
+        const cur = tx(db, "readwrite").openCursor();
+        cur.onsuccess = () => {
+          const c = cur.result;
+          if (!c) return resolve();
+          if (!valid.has(c.value.taskId)) c.delete();
+          c.continue();
+        };
+        cur.onerror = () => resolve();
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Downscale to ~1280px JPEG so storage stays small. */
+  async function compressImage(file, max = 1280) {
+    try {
+      const img = await createImageBitmap(file);
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      if (scale === 1 && file.size < 500_000) return file;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.82));
+      return blob || file;
+    } catch {
+      return file;
+    }
+  }
+
   // ---------- Trash (recoverable deletes, kept 30 days) ----------
   function loadTrash() {
     try {
@@ -271,6 +370,9 @@
     importLead: $("importLead"), importBE: $("importBE"), importPreview: $("importPreview"),
     trashBtn: $("trashBtn"), trashDialog: $("trashDialog"), trashList: $("trashList"),
     emptyTrashBtn: $("emptyTrashBtn"),
+    photoThumbs: $("photoThumbs"), photoInput: $("photoInput"), shareBtn: $("shareBtn"),
+    photoViewer: $("photoViewer"), viewerImg: $("viewerImg"),
+    viewerDeleteBtn: $("viewerDeleteBtn"), viewerCloseBtn: $("viewerCloseBtn"),
   };
 
   // ---------- Rendering ----------
@@ -525,6 +627,8 @@
       meta.appendChild(plain("เสร็จเมื่อ " + relLabel(toISODate(new Date(task.doneAt)))));
     }
     if (cat) meta.appendChild(catBadge(cat));
+    const nPhotos = photoCounts.get(task.id) || 0;
+    if (nPhotos) meta.appendChild(plain("📎 " + nPhotos));
     if (task.time) meta.appendChild(plain("🕒 " + task.time));
     if (task.repeat && task.repeat !== "none") meta.appendChild(badge("↻ " + repeatLabel(task.repeat), "repeat"));
     if (task.tag) meta.appendChild(badge("# " + task.tag, "tag", task.tag));
@@ -1084,6 +1188,97 @@
   }
 
   // ---------- Edit dialog ----------
+  let thumbUrls = []; // object URLs to revoke when the dialog refreshes/closes
+  let viewingPhoto = null; // {id, taskId}
+
+  async function renderPhotoThumbs(taskId) {
+    thumbUrls.forEach((u) => URL.revokeObjectURL(u));
+    thumbUrls = [];
+    els.photoThumbs.innerHTML = "";
+    let photos = [];
+    try {
+      photos = await photosFor(taskId);
+    } catch {
+      els.photoThumbs.innerHTML = `<p class="hint">อุปกรณ์นี้ไม่รองรับการเก็บรูป</p>`;
+      return;
+    }
+    photos
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .forEach((ph) => {
+        const url = URL.createObjectURL(ph.blob);
+        thumbUrls.push(url);
+        const img = document.createElement("img");
+        img.className = "photos__thumb";
+        img.src = url;
+        img.alt = "รูปแนบ";
+        img.onclick = (e) => {
+          e.preventDefault();
+          viewingPhoto = { id: ph.id, taskId };
+          els.viewerImg.src = url;
+          els.photoViewer.showModal();
+        };
+        els.photoThumbs.appendChild(img);
+      });
+  }
+
+  async function handlePhotoInput(files) {
+    if (!editingId || !files.length) return;
+    for (const f of files) {
+      const blob = await compressImage(f);
+      await photoAdd(editingId, blob).catch(() => null);
+    }
+    await renderPhotoThumbs(editingId);
+    render(); // refresh 📎 badges
+  }
+
+  // ---------- Share (Web Share API -> LINE etc., clipboard fallback) ----------
+  function shareText(t) {
+    const lines = ["📌 " + t.title];
+    if (t.date) lines.push("🗓 ครบกำหนด " + relLabel(t.date) + (t.time ? " " + t.time : ""));
+    if (t.tag) lines.push("# " + t.tag);
+    if (t.note) lines.push(t.note);
+    if (t.subtasks && t.subtasks.length) {
+      lines.push("งานย่อย:");
+      t.subtasks.forEach((s) => lines.push((s.done ? "☑ " : "☐ ") + s.title));
+    }
+    return lines.join("\n");
+  }
+
+  async function shareTask() {
+    const t = tasks.find((x) => x.id === editingId);
+    if (!t) return;
+    const text = shareText(t);
+    // Attach photos when the platform supports sharing files.
+    let files = [];
+    try {
+      const photos = await photosFor(t.id);
+      files = photos
+        .slice(0, 3)
+        .map((p, i) => new File([p.blob], `photo-${i + 1}.jpg`, { type: "image/jpeg" }));
+    } catch {
+      files = [];
+    }
+    try {
+      if (navigator.share) {
+        const payload = { text };
+        if (files.length && navigator.canShare && navigator.canShare({ files })) {
+          payload.files = files;
+        }
+        await navigator.share(payload);
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === "AbortError") return; // user cancelled the share sheet
+    }
+    // Fallback: copy to clipboard.
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("คัดลอกแล้ว — ไปวางใน LINE ได้เลย");
+    } catch {
+      showToast("อุปกรณ์นี้ไม่รองรับการแชร์");
+    }
+  }
+
   function openEdit(id) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
@@ -1098,6 +1293,7 @@
     els.editNote.value = t.note || "";
     els.editImportant.checked = Boolean(t.important);
     renderSubEditor();
+    renderPhotoThumbs(id);
     els.dialog.showModal();
   }
 
@@ -1719,6 +1915,7 @@
         trash = [];
         saveTrash();
         renderTrashList();
+        cleanupPhotos().then(() => loadPhotoCounts());
       }
     });
     els.importFile.addEventListener("change", (e) => {
@@ -1746,6 +1943,22 @@
         els.editDate.value = toISODate(d);
       }),
     );
+    // Photos + share
+    els.photoInput.addEventListener("change", (e) => {
+      handlePhotoInput([...e.target.files]);
+      e.target.value = "";
+    });
+    els.shareBtn.addEventListener("click", shareTask);
+    els.viewerCloseBtn.addEventListener("click", () => els.photoViewer.close());
+    els.viewerDeleteBtn.addEventListener("click", async () => {
+      if (!viewingPhoto) return;
+      await photoDelete(viewingPhoto.id, viewingPhoto.taskId).catch(() => null);
+      els.photoViewer.close();
+      await renderPhotoThumbs(viewingPhoto.taskId);
+      viewingPhoto = null;
+      render();
+    });
+
     els.cancelBtn.addEventListener("click", () => els.dialog.close());
     els.deleteBtn.addEventListener("click", () => {
       const id = editingId;
@@ -1781,6 +1994,9 @@
       navigator.storage.persist().catch(() => {});
     }
     maybePromptBackup();
+
+    // Photo badges + orphan cleanup (async; UI works without them).
+    loadPhotoCounts().then(() => cleanupPhotos());
   }
 
   document.addEventListener("DOMContentLoaded", init);

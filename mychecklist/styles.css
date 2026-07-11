@@ -1180,3 +1180,41 @@ body {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ---------- Photo attachments ---------- */
+.photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.photos__thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.photos__add {
+  display: inline-block;
+  cursor: pointer;
+  text-align: center;
+}
+
+/* ---------- Photo viewer ---------- */
+.viewer {
+  padding: 12px;
+  max-width: min(92vw, 720px);
+}
+.viewer__img {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin: 0 auto 12px;
+  border-radius: 10px;
+}
+.viewer__actions {
+  display: flex;
+  gap: 8px;
+}

@@ -218,6 +218,16 @@
           </div>
         </div>
 
+        <!-- Photos -->
+        <div class="field">
+          <span>รูปภาพ</span>
+          <div class="photos" id="photoThumbs"></div>
+          <label class="btn btn--ghost photos__add">
+            📷 ถ่าย/เลือกรูป
+            <input type="file" id="photoInput" accept="image/*" multiple hidden />
+          </label>
+        </div>
+
         <label class="check-field">
           <input type="checkbox" id="editImportant" />
           <span>⭐ ทำเครื่องหมายว่าสำคัญ (ปักหมุดขึ้นบนสุด)</span>
@@ -225,11 +235,22 @@
 
         <div class="dialog__actions">
           <button type="button" class="btn btn--danger" id="deleteBtn">ลบ</button>
+          <button type="button" class="btn btn--ghost" id="shareBtn">📤 แชร์</button>
           <div class="spacer"></div>
           <button type="button" class="btn btn--ghost" id="cancelBtn">ยกเลิก</button>
           <button type="submit" class="btn btn--primary">บันทึก</button>
         </div>
       </form>
+    </dialog>
+
+    <!-- Photo viewer -->
+    <dialog class="dialog viewer" id="photoViewer">
+      <img class="viewer__img" id="viewerImg" alt="รูปแนบ" />
+      <div class="viewer__actions">
+        <button type="button" class="btn btn--danger" id="viewerDeleteBtn">ลบรูปนี้</button>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn--primary" id="viewerCloseBtn">ปิด</button>
+      </div>
     </dialog>
 
     <!-- Settings dialog -->
